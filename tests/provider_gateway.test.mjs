@@ -8,6 +8,21 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BIN = join(ROOT, 'bin', 'remote-compute.mjs');
 
+function makeProviderScript(isWindows) {
+  return isWindows
+    ? '@echo off\r\necho %* > "%REMOTE_COMPUTE_PROVIDER_LOG%"\r\nexit /b 0\r\n'
+    : '#!/bin/sh\nprintf "%s\\n" "$*" > "$REMOTE_COMPUTE_PROVIDER_LOG"\n';
+}
+
+function runGateway(args, { root, env }) {
+  return spawnSync(process.execPath, [BIN, 'colab', ...args], {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+}
+
 export async function runProviderGatewayTests() {
   console.log('--- provider gateway ---');
   const root = await mkdtemp(join(tmpdir(), 'remote-compute-provider-gateway-'));
@@ -18,10 +33,7 @@ export async function runProviderGatewayTests() {
   try {
     const isWindows = process.platform === 'win32';
     const colabPath = join(binDir, isWindows ? 'colab.cmd' : 'colab');
-    const script = isWindows
-      ? '@echo off\r\necho %* > "%REMOTE_COMPUTE_PROVIDER_LOG%"\r\nexit /b 0\r\n'
-      : '#!/bin/sh\nprintf "%s\\n" "$*" > "$REMOTE_COMPUTE_PROVIDER_LOG"\n';
-    await writeFile(colabPath, script, 'utf8');
+    await writeFile(colabPath, makeProviderScript(isWindows), 'utf8');
     if (!isWindows) await chmod(colabPath, 0o755);
 
     const env = {
@@ -31,18 +43,19 @@ export async function runProviderGatewayTests() {
       REMOTE_COMPUTE_PROVIDER_LOG: logPath,
     };
 
-    const result = spawnSync(process.execPath, [BIN, 'colab', 'sessions', '--some-provider-flag', 'value'], {
-      cwd: root,
-      env,
-      encoding: 'utf8',
-      timeout: 30_000,
-    });
-
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    const forwarded = (await readFile(logPath, 'utf8')).trim();
+    const defaultAuth = runGateway(['sessions', '--some-provider-flag', 'value'], { root, env });
+    assert.equal(defaultAuth.status, 0, defaultAuth.stderr || defaultAuth.stdout);
+    let forwarded = (await readFile(logPath, 'utf8')).trim();
+    assert.match(forwarded, /--auth=oauth2/);
     assert.match(forwarded, /sessions/);
     assert.match(forwarded, /--some-provider-flag/);
     assert.match(forwarded, /value/);
+
+    const explicitAdc = runGateway(['--auth=adc', 'sessions'], { root, env });
+    assert.equal(explicitAdc.status, 0, explicitAdc.stderr || explicitAdc.stdout);
+    forwarded = (await readFile(logPath, 'utf8')).trim();
+    assert.match(forwarded, /--auth=adc/);
+    assert.doesNotMatch(forwarded, /--auth=oauth2/);
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
