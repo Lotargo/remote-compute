@@ -1,180 +1,64 @@
-import { constants as fsConstants } from 'node:fs';
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, delimiter, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
+import { resolveClientExecutable } from './client_cli.mjs';
+import { authenticateColab, checkColabAccess, getColabExecutable, installColabCli } from './colab.mjs';
+import {
+  HOST_DEFINITIONS,
+  detectHosts,
+  requestedHostIds,
+  resolveSkillTargets,
+  selectDetectedHosts,
+  selectKnownHosts,
+} from './hosts.mjs';
+import { inspectSkillDir, installSkillTargets, removeSkillTargets } from './skills.mjs';
+
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SKILL_SOURCE = join(PACKAGE_ROOT, 'skills', 'remote-compute', 'SKILL.md');
-const MANAGED_MARKER = 'managed-by: remote-compute';
-
-const HOSTS = [
-  { id: 'codex', command: 'codex', family: 'agents', label: 'Codex' },
-  { id: 'agy', command: 'agy', family: 'agents', label: 'AGY / Antigravity CLI' },
-  { id: 'opencode', command: 'opencode', family: 'agents', label: 'OpenCode' },
-  { id: 'claude', command: 'claude', family: 'claude', label: 'Claude Code' },
-];
-
-const COLAB_INSTALL = {
-  uv: ['tool', 'install', 'google-colab-cli'],
-  python3: ['-m', 'pip', 'install', '--user', 'google-colab-cli'],
-  python: ['-m', 'pip', 'install', '--user', 'google-colab-cli'],
-};
-
-const COLAB_SCOPES = [
-  'openid',
-  'https://www.googleapis.com/auth/cloud-platform',
-  'https://www.googleapis.com/auth/userinfo.email',
-  'https://www.googleapis.com/auth/colaboratory',
-].join(',');
+const PACKAGED_SKILL_DIR = join(PACKAGE_ROOT, 'skills', 'remote-compute');
 
 function printHelp() {
   console.log(`remote-compute
 
 Usage:
-  remote-compute setup [--install-colab] [--yes] [--force]
-  remote-compute doctor
+  remote-compute setup [host flags] [--install-colab] [--yes] [--force]
+  remote-compute doctor [host flags]
   remote-compute auth
-  remote-compute uninstall
+  remote-compute uninstall [host flags] [--dry-run]
   remote-compute help
 
-Commands:
-  setup       Detect agent hosts and install the remote-compute skill.
-  doctor      Check agent hosts, skill installation, Colab CLI and auth.
-  auth        Run Google's ADC browser authentication flow and verify Colab.
-  uninstall   Remove only skill files managed by remote-compute.
+Host flags:
+  --codex       Target Codex only
+  --agy         Target AGY / Antigravity only
+  --opencode    Target OpenCode only
+  --claude      Target Claude Code only
+  (no flag)     Setup/doctor detected hosts; uninstall checks all known host paths
 
-Options:
-  --install-colab  Install google-colab-cli if it is missing.
-  --yes            Non-interactive mode. Does not imply --install-colab.
-  --force          Rewrite managed skill copies even if already installed.
+Setup options:
+  --install-colab  Install the official google-colab-cli if it is missing
+  --yes            Non-interactive mode; does not imply --install-colab
+  --force          Refresh a managed skill that differs from the packaged copy
+
+Uninstall options:
+  --dry-run        Preview owned skill directories that would be removed
+
+Commands:
+  setup       Detect agent hosts, install the remote-compute skill, and check Colab
+  doctor      Validate host integration, skill ownership, provider CLI, and auth
+  auth        Run Google's official ADC browser flow and verify Colab access
+  uninstall   Remove only unmodified skill directories owned by remote-compute
 `);
 }
 
-async function exists(path) {
-  try {
-    await access(path, fsConstants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function pathCandidates(command) {
-  const paths = (process.env.PATH || '').split(delimiter).filter(Boolean);
-  const extensions = process.platform === 'win32'
-    ? (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';')
-    : [''];
-
-  const candidates = [];
-  for (const base of paths) {
-    for (const ext of extensions) {
-      candidates.push(join(base, process.platform === 'win32' ? `${command}${ext}` : command));
-    }
-  }
-  return candidates;
-}
-
-function findExecutable(command) {
-  for (const candidate of pathCandidates(command)) {
-    try {
-      const result = spawnSync(candidate, ['--version'], {
-        stdio: 'ignore',
-        timeout: 3000,
-      });
-      if (!result.error || result.error.code !== 'ENOENT') return candidate;
-    } catch {
-      // Keep scanning PATH.
-    }
-  }
-  return null;
-}
-
-function run(command, args, options = {}) {
-  return spawnSync(command, args, {
-    encoding: options.inherit ? undefined : 'utf8',
-    stdio: options.inherit ? 'inherit' : 'pipe',
-    timeout: options.timeout ?? 120000,
-    env: process.env,
-  });
-}
-
-function detectHosts() {
-  return HOSTS.map((host) => ({ ...host, path: findExecutable(host.command) }));
-}
-
-function skillTargets(hosts) {
-  const home = homedir();
-  const targets = [];
-
-  if (hosts.some((host) => host.path && host.family === 'agents')) {
-    targets.push({
-      family: 'agents',
-      path: join(home, '.agents', 'skills', 'remote-compute', 'SKILL.md'),
-      label: '~/.agents/skills/remote-compute/SKILL.md',
-    });
-  }
-
-  if (hosts.some((host) => host.path && host.family === 'claude')) {
-    targets.push({
-      family: 'claude',
-      path: join(home, '.claude', 'skills', 'remote-compute', 'SKILL.md'),
-      label: '~/.claude/skills/remote-compute/SKILL.md',
-    });
-  }
-
-  return targets;
-}
-
-async function inspectSkill(path) {
-  if (!(await exists(path))) return { exists: false, managed: false };
-  const content = await readFile(path, 'utf8');
-  return { exists: true, managed: content.includes(MANAGED_MARKER), content };
-}
-
-async function installSkills(hosts, { force = false } = {}) {
-  const source = await readFile(SKILL_SOURCE, 'utf8');
-  const targets = skillTargets(hosts);
-
-  for (const target of targets) {
-    const state = await inspectSkill(target.path);
-    if (state.exists && !state.managed) {
-      console.warn(`! ${target.label} already exists and is not managed by remote-compute; leaving it untouched.`);
-      continue;
-    }
-
-    if (state.exists && state.content === source && !force) {
-      console.log(`✓ skill already current: ${target.label}`);
-      continue;
-    }
-
-    await mkdir(dirname(target.path), { recursive: true });
-    await writeFile(target.path, source, 'utf8');
-    console.log(`✓ installed skill: ${target.label}`);
-  }
-}
-
-async function removeManagedSkill(path, label) {
-  const state = await inspectSkill(path);
-  if (!state.exists) {
-    console.log(`· not installed: ${label}`);
-    return;
-  }
-  if (!state.managed) {
-    console.warn(`! not removing unmanaged skill: ${label}`);
-    return;
-  }
-  await rm(dirname(path), { recursive: true, force: true });
-  console.log(`✓ removed: ${label}`);
-}
-
-function printHosts(hosts) {
+function printHosts(hosts, { requested = new Set() } = {}) {
   console.log('Agent hosts');
   for (const host of hosts) {
-    console.log(`${host.path ? '✓' : '·'} ${host.label}${host.path ? `  ${host.path}` : ''}`);
+    const selected = requested.size === 0 || requested.has(host.id);
+    const marker = host.path ? '✓' : '·';
+    const suffix = host.path ? `  ${host.path}` : selected && requested.size > 0 ? '  requested but not found' : '';
+    console.log(`${marker} ${host.label}${suffix}`);
   }
 }
 
@@ -191,191 +75,189 @@ async function askYesNo(question, defaultYes = true) {
   }
 }
 
-function installColab() {
-  for (const command of ['uv', 'python3', 'python']) {
-    const executable = findExecutable(command);
-    if (!executable) continue;
-
-    console.log(`Installing google-colab-cli with ${command}...`);
-    const result = run(executable, COLAB_INSTALL[command], { inherit: true, timeout: 300000 });
-    if (result.status === 0) {
-      const colab = findExecutable('colab');
-      if (colab) {
-        console.log(`✓ Colab CLI installed: ${colab}`);
-        return colab;
-      }
-      console.warn('! Installation completed, but `colab` is not visible on PATH in this process yet.');
-      return null;
-    }
-  }
-
-  console.error('Could not install google-colab-cli automatically. Install `uv` or Python first, then run:');
-  console.error('  uv tool install google-colab-cli');
-  return null;
-}
-
-function checkColabAuth() {
-  const colab = findExecutable('colab');
-  if (!colab) return { ok: false, reason: 'missing' };
-
-  const result = run(colab, ['sessions'], { timeout: 30000 });
-  if (result.status === 0) return { ok: true };
-
-  const detail = `${result.stderr || ''}${result.stdout || ''}`.trim();
-  return { ok: false, reason: 'auth', detail };
+function missingRequestedHosts(hosts, args) {
+  const requested = requestedHostIds(args);
+  if (requested.size === 0) return [];
+  return hosts.filter((host) => requested.has(host.id) && !host.path);
 }
 
 async function setup(args) {
   const yes = args.includes('--yes');
   const force = args.includes('--force');
   const installRequested = args.includes('--install-colab');
+  const requested = requestedHostIds(args);
 
   console.log('remote-compute setup\n');
 
   const hosts = detectHosts();
-  printHosts(hosts);
-  const activeHosts = hosts.filter((host) => host.path);
+  printHosts(hosts, { requested });
 
+  for (const host of missingRequestedHosts(hosts, args)) {
+    console.warn(`! ${host.label} was explicitly requested but its CLI is not available on PATH.`);
+  }
+
+  const activeHosts = selectDetectedHosts(hosts, args);
   if (activeHosts.length === 0) {
-    console.error('\nNo supported agent CLI found on PATH. Install at least one of: codex, agy, opencode, claude.');
+    console.error('\nNo selected supported agent CLI was found on PATH. Install at least one of: codex, agy, opencode, claude.');
     process.exitCode = 2;
     return;
   }
 
-  console.log('');
-  await installSkills(hosts, { force });
+  console.log('\nSkills');
+  const targets = resolveSkillTargets(activeHosts);
+  await installSkillTargets(targets, PACKAGED_SKILL_DIR, { force });
 
-  let colab = findExecutable('colab');
+  if (process.platform === 'win32') {
+    console.warn('\n! Native Windows detected. The upstream Colab CLI currently requires Linux or macOS; use remote-compute from WSL.');
+  }
+
+  let colab = getColabExecutable();
   if (!colab) {
-    console.warn('\n! Google Colab CLI is not installed.');
+    console.warn('\n! Google Colab CLI is not installed or is not visible on PATH.');
     let shouldInstall = installRequested;
-    if (!yes && !installRequested) {
+    if (!yes && !installRequested && process.platform !== 'win32') {
       shouldInstall = await askYesNo('Install the official google-colab-cli now?');
     }
-    if (shouldInstall) colab = installColab();
+
+    if (shouldInstall && process.platform !== 'win32') {
+      const installed = installColabCli();
+      colab = installed.executable;
+    }
   }
 
   if (colab) {
     console.log(`\n✓ Colab CLI: ${colab}`);
-    const auth = checkColabAuth();
-    if (auth.ok) {
-      console.log('✓ Colab authentication check passed.');
+    const access = checkColabAccess();
+    if (access.ok) {
+      console.log('✓ Colab authentication/access check passed.');
     } else {
-      console.log('· Colab authentication is not ready yet. Run: remote-compute auth');
+      console.log(`· Colab access is not ready yet${access.detail ? `: ${access.detail}` : '.'}`);
+      console.log('  Run: remote-compute auth');
     }
-  } else {
+  } else if (process.platform !== 'win32') {
     console.log('\nNext step: install the official Colab CLI, then run `remote-compute auth`.');
-  }
-
-  if (process.platform === 'win32') {
-    console.warn('\n! Upstream Colab CLI does not currently support native Windows. Run remote-compute from WSL.');
   }
 
   console.log('\nSetup complete. Restart/reload your agent CLI if it does not notice the new skill immediately.');
 }
 
-async function doctor() {
+async function doctor(args) {
   console.log('remote-compute doctor\n');
-  const hosts = detectHosts();
-  printHosts(hosts);
 
-  const activeHosts = hosts.filter((host) => host.path);
-  let hardFailure = activeHosts.length === 0;
+  const checks = [];
+  const record = (level, label, detail = '') => {
+    checks.push({ level, label, detail });
+    console.log(`[${level}] ${label}${detail ? `: ${detail}` : ''}`);
+  };
+
+  const requested = requestedHostIds(args);
+  const hosts = detectHosts();
+  printHosts(hosts, { requested });
+  console.log('');
+
+  for (const host of missingRequestedHosts(hosts, args)) {
+    record('FAIL', `${host.label} CLI`, 'explicitly requested but not found on PATH');
+  }
+
+  const activeHosts = selectDetectedHosts(hosts, args);
+  if (activeHosts.length === 0) {
+    record('FAIL', 'Agent host', 'no selected supported agent CLI found');
+  } else {
+    record('OK', 'Agent host discovery', `${activeHosts.length} selected host(s)`);
+  }
 
   console.log('\nSkills');
-  const targets = skillTargets(hosts);
-  if (targets.length === 0) {
-    console.log('✗ no skill target because no supported host was detected');
-  }
+  const targets = resolveSkillTargets(activeHosts);
   for (const target of targets) {
-    const state = await inspectSkill(target.path);
-    const ok = state.exists && state.managed;
-    console.log(`${ok ? '✓' : '✗'} ${target.label}${state.exists && !state.managed ? ' (occupied by unmanaged skill)' : ''}`);
-    if (!ok) hardFailure = true;
+    const state = await inspectSkillDir(target.dir, PACKAGED_SKILL_DIR);
+    if (state.owned) {
+      record('OK', 'Skill', target.label);
+    } else if (state.exists && state.managed) {
+      record('WARN', 'Skill', `${target.label} differs from packaged copy (possibly customized or stale)`);
+    } else if (state.exists) {
+      record('FAIL', 'Skill', `${target.label} is occupied by an unrelated skill`);
+    } else {
+      record('FAIL', 'Skill', `${target.label} is missing`);
+    }
   }
 
   console.log('\nProvider: Google Colab');
-  const colab = findExecutable('colab');
-  console.log(`${colab ? '✓' : '✗'} colab CLI${colab ? `  ${colab}` : ''}`);
-  if (!colab) hardFailure = true;
-
-  const gcloud = findExecutable('gcloud');
-  console.log(`${gcloud ? '✓' : '·'} gcloud${gcloud ? `  ${gcloud}` : '  optional until authentication is needed'}`);
-
-  if (colab) {
-    const auth = checkColabAuth();
-    console.log(`${auth.ok ? '✓' : '·'} Colab authentication${auth.ok ? '' : '  run `remote-compute auth` if needed'}`);
+  const colab = getColabExecutable();
+  if (!colab) {
+    record('FAIL', 'Colab CLI', 'not found on PATH');
+  } else {
+    record('OK', 'Colab CLI', colab);
+    const access = checkColabAccess();
+    if (access.ok) record('OK', 'Colab authentication/access', 'read-only sessions query succeeded');
+    else record('FAIL', 'Colab authentication/access', access.detail || 'run `remote-compute auth`');
   }
+
+  const gcloud = resolveClientExecutable('gcloud');
+  if (gcloud) record('INFO', 'gcloud', gcloud);
+  else record('INFO', 'gcloud', 'not installed; only needed for the recommended auth flow');
 
   if (process.platform === 'win32') {
-    console.log('\n✗ native Windows detected; upstream Colab CLI currently requires Linux or macOS. Use WSL.');
-    hardFailure = true;
+    record('FAIL', 'Platform', 'native Windows; use WSL for the upstream Colab CLI');
   } else {
-    console.log(`\n✓ platform: ${process.platform}`);
+    record('OK', 'Platform', process.platform);
   }
 
-  console.log(`\nStatus: ${hardFailure ? 'NEEDS ATTENTION' : 'READY'}`);
-  if (hardFailure) process.exitCode = 1;
+  const failures = checks.filter((check) => check.level === 'FAIL').length;
+  const warnings = checks.filter((check) => check.level === 'WARN').length;
+  const status = failures > 0 ? 'NEEDS ATTENTION' : warnings > 0 ? 'READY WITH WARNINGS' : 'READY';
+  console.log(`\nStatus: ${status}`);
+  if (failures > 0) process.exitCode = 1;
 }
 
 async function auth() {
-  const colab = findExecutable('colab');
-  if (!colab) {
-    console.error('Google Colab CLI is missing. Install it first with `uv tool install google-colab-cli`.');
-    process.exitCode = 2;
+  const result = authenticateColab();
+
+  if (result.ok) {
+    console.log(result.alreadyAuthenticated
+      ? '✓ Colab authentication already works.'
+      : '✓ Colab authentication verified.');
     return;
   }
 
-  const existing = checkColabAuth();
-  if (existing.ok) {
-    console.log('✓ Colab authentication already works.');
-    return;
-  }
-
-  const gcloud = findExecutable('gcloud');
-  if (!gcloud) {
-    console.error('`gcloud` is required for the recommended ADC authentication flow but was not found on PATH.');
-    console.error('Install Google Cloud CLI, then rerun `remote-compute auth`.');
-    console.error('remote-compute never stores Google credentials itself.');
-    process.exitCode = 2;
-    return;
-  }
-
-  console.log('Opening the official Google Application Default Credentials flow...');
-  const result = run(gcloud, [
-    'auth',
-    'application-default',
-    'login',
-    `--scopes=${COLAB_SCOPES}`,
-  ], { inherit: true, timeout: 300000 });
-
-  if (result.status !== 0) {
-    console.error('Google authentication did not complete successfully.');
-    process.exitCode = result.status || 1;
-    return;
-  }
-
-  const verified = checkColabAuth();
-  if (verified.ok) {
-    console.log('✓ Colab authentication verified.');
-  } else {
-    console.error('Authentication finished, but `colab sessions` still failed. Run `colab whoami` or `colab skill` for upstream diagnostics.');
-    process.exitCode = 1;
+  switch (result.reason) {
+    case 'missing_colab':
+      console.error('Google Colab CLI is missing. Install it first with `uv tool install google-colab-cli`.');
+      process.exitCode = 2;
+      break;
+    case 'missing_gcloud':
+      console.error('`gcloud` is required for the recommended ADC authentication flow but was not found on PATH.');
+      console.error('Install Google Cloud CLI, then rerun `remote-compute auth`.');
+      console.error('remote-compute never stores Google credentials itself.');
+      process.exitCode = 2;
+      break;
+    case 'gcloud_auth_failed':
+      console.error(`Google authentication did not complete successfully${result.detail ? `: ${result.detail}` : '.'}`);
+      process.exitCode = 1;
+      break;
+    case 'verification_failed':
+      console.error(`Authentication finished, but Colab verification still failed${result.detail ? `: ${result.detail}` : '.'}`);
+      console.error('Run `colab skill` / `colab help` for upstream diagnostics.');
+      process.exitCode = 1;
+      break;
+    default:
+      console.error(`Colab authentication failed${result.detail ? `: ${result.detail}` : '.'}`);
+      process.exitCode = 1;
   }
 }
 
-async function uninstall() {
-  const home = homedir();
-  console.log('remote-compute uninstall\n');
-  await removeManagedSkill(
-    join(home, '.agents', 'skills', 'remote-compute', 'SKILL.md'),
-    '~/.agents/skills/remote-compute/SKILL.md',
-  );
-  await removeManagedSkill(
-    join(home, '.claude', 'skills', 'remote-compute', 'SKILL.md'),
-    '~/.claude/skills/remote-compute/SKILL.md',
-  );
-  console.log('\nProvider CLIs and credentials were left untouched.');
+async function uninstall(args) {
+  const dryRun = args.includes('--dry-run') || args.includes('--dry');
+  console.log(`remote-compute uninstall${dryRun ? ' (dry run)' : ''}\n`);
+
+  const knownHosts = selectKnownHosts(args);
+  const targets = resolveSkillTargets(knownHosts);
+  const results = await removeSkillTargets(targets, PACKAGED_SKILL_DIR, { dryRun });
+
+  const removable = results.filter((result) => result.status === 'removed' || result.status === 'would_remove').length;
+  const protectedCount = results.filter((result) => result.status === 'modified' || result.status === 'conflict').length;
+
+  console.log(`\n${dryRun ? 'Preview' : 'Uninstall'} complete. ${removable} owned skill target(s) ${dryRun ? 'would be removed' : 'removed'}, ${protectedCount} protected.`);
+  console.log('Provider CLIs and Google credentials were left untouched.');
 }
 
 export async function main(argv) {
@@ -387,13 +269,13 @@ export async function main(argv) {
       await setup(args);
       break;
     case 'doctor':
-      await doctor();
+      await doctor(args);
       break;
     case 'auth':
       await auth();
       break;
     case 'uninstall':
-      await uninstall();
+      await uninstall(args);
       break;
     case 'help':
     case '--help':
@@ -412,3 +294,5 @@ export async function main(argv) {
       process.exitCode = 2;
   }
 }
+
+export { HOST_DEFINITIONS };
