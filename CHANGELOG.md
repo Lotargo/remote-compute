@@ -18,6 +18,7 @@ Initial release of `remote-compute`.
 - Added Google Colab as the first remote-compute provider through the official `google-colab-cli`.
 - Added a transparent Windows -> WSL compatibility bridge, allowing users to stay in PowerShell and keep their repositories and agent CLIs on Windows.
 - Added the official Colab OAuth2 copy-paste login flow, verified end-to-end from Windows through WSL to Google Colab.
+- Added agent guidance for provider-native Google Drive mounting and persistent large-asset/checkpoint workflows without introducing a separate Drive API client.
 - Kept runtime dependencies at zero and avoided Docker, a custom Colab API client, and credential storage.
 
 ### Added
@@ -41,6 +42,8 @@ Initial release of `remote-compute`.
 - Automatic WSL fallback on Windows when native `colab` is unavailable.
 - Native provider support remains preferred automatically if it becomes available on Windows later.
 - Provider flags are forwarded without reimplementing Colab command semantics.
+- Provider-native Google Drive mounting remains available through `remote-compute colab drivemount ...`; no parallel Drive API/storage subsystem is introduced.
+- Provider upload/download commands remain available through the same gateway for small disposable file transfers.
 
 #### Windows / WSL compatibility
 
@@ -94,6 +97,10 @@ Initial release of `remote-compute`.
   - consult provider self-documentation through `remote-compute colab skill/help`;
   - use exact Git revisions for reproducible jobs;
   - avoid silently committing or pushing user work;
+  - use provider upload/download for small disposable transfers;
+  - use Colab's provider-native `drivemount` flow for persistent large assets/checkpoints when appropriate;
+  - recognize Drive mounting as interactive and ask the user to complete consent rather than hanging unattended;
+  - keep the hot working set on VM-local storage for compute-heavy access;
   - keep large assets and checkpoints outside Git;
   - treat remote workers as disposable;
   - persist important state externally;
@@ -148,6 +155,7 @@ The validated environment reached `remote-compute doctor -> Status: READY`, and 
 
 - Google Colab is the only provider adapter in this release.
 - Windows uses WSL as the compatibility backend when native Colab is unavailable.
+- Google Drive access uses Colab CLI's interactive provider-native `drivemount` flow rather than a custom Drive integration; unattended agents may require user consent before continuing.
 - Fresh WSL installations may require a restart and one-time distro initialization before provider setup can finish.
 - Mapped/network Windows drives may not be accessible to WSL depending on host configuration.
 - CI/CD is intentionally not configured; the canonical verification gate is local via `npm run verify`.
