@@ -22,6 +22,10 @@ export async function runContractTests() {
 
   const pkg = JSON.parse(await readFile(PACKAGE_PATH, 'utf8'));
   assert.equal(pkg.name, '@lotargo/remote-compute');
+  assert.match(pkg.description, /Google Colab/i, 'package description must keep the current Colab-first product focus visible');
+  for (const keyword of ['google-colab', 'colab', 'colab-cli', 'remote-compute', 'coding-agents']) {
+    assert.ok(pkg.keywords?.includes(keyword), `package keywords must include ${keyword}`);
+  }
   assert.equal(pkg.type, 'module');
   assert.equal(pkg.bin?.['remote-compute'], 'bin/remote-compute.mjs');
   assert.equal(existsSync(join(ROOT, pkg.bin['remote-compute'])), true, 'package bin target must exist');
@@ -85,6 +89,7 @@ export async function runContractTests() {
   assert.match(changelog, /Windows -> WSL/i);
   assert.match(changelog, /OAuth2/i);
   assert.match(changelog, /Google Drive/i);
+  assert.match(changelog, /Colab remote-compute integration/i);
 
   const wslSource = normalizeNewlines(await readFile(WSL_TRANSPORT_PATH, 'utf8'));
   assert.match(wslSource, /wslpath/);
