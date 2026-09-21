@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { join } from 'node:path';
 
 import { detectHosts, resolveSkillTargets, selectDetectedHosts } from '../src/hosts.mjs';
 
@@ -36,7 +36,7 @@ export async function runHostTests() {
       ...process.env,
       HOME: home,
       USERPROFILE: home,
-      PATH: `${binDir}${delimiter}${process.env.PATH || ''}`,
+      PATH: binDir,
       PATHEXT: '.CMD;.EXE;.BAT;.COM',
       OPENCODE_CONFIG_DIR: customOpenCode,
     };
