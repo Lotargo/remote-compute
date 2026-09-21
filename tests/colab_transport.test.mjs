@@ -68,6 +68,7 @@ export async function runColabTransportTests() {
         const isResolver = args.includes('remote-compute');
         if (isResolver) {
           const requested = args.at(-1);
+          if (requested === 'sh') return result({ stdout: '/bin/sh\n' });
           if (requested === 'curl') return result({ stdout: '/usr/bin/curl\n' });
           if (requested === 'uv' && uvInstalled) {
             return result({ stdout: '/home/test/.local/bin/uv\n' });
