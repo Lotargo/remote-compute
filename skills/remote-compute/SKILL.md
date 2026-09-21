@@ -42,7 +42,11 @@ remote-compute colab sessions
 remote-compute colab status
 ```
 
-If authentication fails, ask the user to run `remote-compute auth` or complete Google's official authentication flow. Never request raw OAuth tokens, cookies, or credential files in chat.
+`remote-compute` uses the official Colab CLI OAuth2 provider by default. On first login, `remote-compute auth` launches the provider's own remote copy-paste flow: Colab prints a Google authorization URL, the user signs in in their normal browser, then pastes the returned authorization code into the terminal. The Colab CLI owns and caches that token; `remote-compute` does not receive or store it.
+
+Do not require `gcloud` for the normal managed login flow. `gcloud` is only relevant when the user explicitly chooses Colab's ADC mode with `--auth=adc`.
+
+If authentication fails in a non-interactive agent run, ask the user to run `remote-compute auth`. Never request raw OAuth tokens, cookies, authorization codes, or credential files in chat.
 
 Do not reason about `wsl.exe`, drive-letter mount points, or Linux distribution internals unless diagnosing the compatibility layer itself. `remote-compute` owns that deterministic platform decision.
 
