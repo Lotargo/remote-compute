@@ -76,11 +76,15 @@ export async function runContractTests() {
   assert.match(skill, /official `colab` CLI/i);
   assert.match(skill, /remote-compute colab skill/);
   assert.match(skill, /remote-compute wsl-path/);
+  assert.match(skill, /remote-compute colab drivemount/);
+  assert.match(skill, /remote-compute colab upload/);
+  assert.match(skill, /remote-compute colab download/);
 
   const changelog = normalizeNewlines(await readFile(CHANGELOG_PATH, 'utf8'));
   assert.match(changelog, /## \[0\.1\.0\] - 2026-09-22/);
   assert.match(changelog, /Windows -> WSL/i);
   assert.match(changelog, /OAuth2/i);
+  assert.match(changelog, /Google Drive/i);
 
   const wslSource = normalizeNewlines(await readFile(WSL_TRANSPORT_PATH, 'utf8'));
   assert.match(wslSource, /wslpath/);
