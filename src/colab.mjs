@@ -150,7 +150,7 @@ function bootstrapUv(transport, {
     'UV_UNMANAGED_INSTALL="$HOME/.local/bin" sh "$tmp"',
   ].join('\n');
 
-  const result = transport.run('/bin/sh', ['-lc', script], {
+  const result = transport.run('sh', ['-lc', script], {
     timeout: 300_000,
     inherit: true,
     bridgeCwd: false,
