@@ -91,7 +91,7 @@ On Linux and macOS, Colab is used natively. On Windows, native Colab is preferre
 
 No Docker runtime is required.
 
-Official Colab CLI installation inside the selected provider environment uses `uv` when available and falls back to Python/pip.
+Colab installation prefers `uv tool install google-colab-cli`. If `uv` is missing, `remote-compute` can bootstrap Astral's official standalone `uv` installer into the provider user's `~/.local/bin` without modifying shell profiles, then install Colab through `uv`. Existing `pipx` is used as a fallback. The installer intentionally does **not** use `pip --break-system-packages` to bypass PEP 668 protections.
 
 ## Install
 
@@ -150,6 +150,8 @@ remote-compute auth --wsl-distro Ubuntu
 The same selection can be supplied through `REMOTE_COMPUTE_WSL_DISTRO`.
 
 A fresh WSL installation may require a Windows restart and/or one-time distro user initialization. `remote-compute` reports that state rather than pretending the provider is ready.
+
+On modern Debian/Ubuntu releases, system Python can be marked as externally managed. `remote-compute` treats that as a reason **not** to force a global/user pip install. Instead it bootstraps `uv` in user space and installs the Colab CLI as an isolated tool.
 
 ### Windows paths
 
