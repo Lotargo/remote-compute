@@ -1,11 +1,13 @@
 import { runClientCliTests } from './client_cli.test.mjs';
 import { runHostTests } from './hosts.test.mjs';
 import { runSkillTests } from './skills.test.mjs';
+import { runSetupTests } from './setup.test.mjs';
 
 const suites = [
   ['client_cli', runClientCliTests],
   ['hosts', runHostTests],
   ['skills', runSkillTests],
+  ['setup lifecycle', runSetupTests],
 ];
 
 let failures = 0;
