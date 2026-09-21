@@ -13,7 +13,8 @@
     "README.md"
   ],
   "scripts": {
-    "check": "node --check bin/remote-compute.mjs && node --check src/cli.mjs"
+    "check": "node --check bin/remote-compute.mjs && node --check src/cli.mjs && node --check src/client_cli.mjs && node --check src/client_paths.mjs && node --check src/hosts.mjs && node --check src/skills.mjs && node --check src/colab.mjs",
+    "test": "node tests/run_all.mjs"
   },
   "engines": {
     "node": ">=18"
