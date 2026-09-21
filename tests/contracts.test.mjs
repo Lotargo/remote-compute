@@ -11,6 +11,10 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PACKAGE_PATH = join(ROOT, 'package.json');
 const SKILL_PATH = join(ROOT, 'skills', 'remote-compute', 'SKILL.md');
 
+function normalizeNewlines(value) {
+  return String(value).replace(/\r\n?/g, '\n');
+}
+
 export async function runContractTests() {
   console.log('--- contracts ---');
 
@@ -51,7 +55,7 @@ export async function runContractTests() {
     assert.ok(host.command.trim().length > 0);
   }
 
-  const skill = await readFile(SKILL_PATH, 'utf8');
+  const skill = normalizeNewlines(await readFile(SKILL_PATH, 'utf8'));
   assert.match(skill, /^---\n/);
   assert.match(skill, /\nname:\s*remote-compute\s*\n/);
   assert.match(skill, /managed-by:\s*remote-compute/);
