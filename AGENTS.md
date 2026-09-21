@@ -62,11 +62,16 @@ Use each client's real skill directories. Codex may receive both its native skil
 ## Development
 
 - Keep runtime dependencies at zero unless a dependency clearly removes more complexity than it adds.
-- Node.js 18+ is the current baseline.
+- Node.js 18.18+ is the current baseline so ESLint 9 and the runtime agree on the supported floor.
 - Keep commands small and inspectable: `setup`, `doctor`, `auth`, `uninstall`.
 - Keep provider bootstrap code separate from host-integration code.
 - Prefer dependency injection for HOME, cwd, env, and platform-sensitive helpers so local tests can use disposable temp environments.
 - Local tests should use fake HOME/workspace/PATH/client executables and must not touch the developer's real agent configuration.
+- Contract tests should verify package metadata, CLI help, host definitions, skill metadata, and other public integration surfaces.
+- Cross-platform tests should cover Windows executable shims/path behavior and Unix behavior through injected platform/env values; native Windows and Unix wrapper scripts should run the same verification gate.
+- ESLint is the general semantic/static linter. Do not rely on `node --check` alone.
+- `npm run verify` is the canonical local quality gate and must include lint, syntax checks, tests, contract checks, platform checks, and packaging validation.
+- Keep `scripts/verify.sh` and `scripts/verify.bat` thin wrappers around the same `npm run verify` command so validation cannot drift between shells.
 - Do not add CI/CD or GitHub Actions unless the repository owner explicitly asks for it. CI minutes are intentionally not being used right now.
 - Tests and smoke checks are run locally for now.
 - Do not add generated build output to the repository.
