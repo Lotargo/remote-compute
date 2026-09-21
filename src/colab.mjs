@@ -4,10 +4,34 @@ import { createWslTransport } from './transports/wsl.mjs';
 
 const UV_INSTALL_URL = 'https://astral.sh/uv/install.sh';
 const DEFAULT_AUTH_PROVIDER = 'oauth2';
+const COLAB_KERNEL_CLIENT_REQUIREMENT =
+  'jupyter-kernel-client @ git+https://github.com/googlecolab/jupyter-kernel-client.git@f18e982c3265df5e923aa9def101ab3fd737e139';
 
 const COLAB_INSTALLERS = Object.freeze([
-  Object.freeze({ command: 'uv', args: ['tool', 'install', 'google-colab-cli'] }),
-  Object.freeze({ command: 'pipx', args: ['install', 'google-colab-cli'] }),
+  Object.freeze({
+    command: 'uv',
+    steps: Object.freeze([
+      Object.freeze([
+        'tool',
+        'install',
+        'google-colab-cli',
+        '--with',
+        COLAB_KERNEL_CLIENT_REQUIREMENT,
+      ]),
+    ]),
+  }),
+  Object.freeze({
+    command: 'pipx',
+    steps: Object.freeze([
+      Object.freeze(['install', 'google-colab-cli']),
+      Object.freeze([
+        'inject',
+        '--force',
+        'google-colab-cli',
+        COLAB_KERNEL_CLIENT_REQUIREMENT,
+      ]),
+    ]),
+  }),
 ]);
 
 function hasExplicitAuth(args = []) {
@@ -191,15 +215,17 @@ function tryInstaller(transport, installer, {
   if (!transport.resolve(installer.command)) return null;
 
   output.log(`Installing google-colab-cli with ${installer.command} via ${transport.label}...`);
-  const result = transport.run(installer.command, installer.args, {
-    timeout: 300_000,
-    inherit: true,
-    bridgeCwd: false,
-  });
+  for (const args of installer.steps) {
+    const result = transport.run(installer.command, args, {
+      timeout: 300_000,
+      inherit: true,
+      bridgeCwd: false,
+    });
 
-  if (!result.ok) {
-    output.warn(`! ${installer.command} failed: ${cliFailureMessage(result)}`);
-    return { ok: false, reason: 'installer_failed', installer: installer.command };
+    if (!result.ok) {
+      output.warn(`! ${installer.command} failed: ${cliFailureMessage(result)}`);
+      return { ok: false, reason: 'installer_failed', installer: installer.command };
+    }
   }
 
   const colab = transport.resolve('colab');

@@ -68,6 +68,7 @@ export async function runColabTransportTests() {
     let uvInstalled = false;
     let colabInstalled = false;
     let uvBootstrapCalls = 0;
+    const uvCalls = [];
     const colabCalls = [];
 
     const runner = (_name, args) => {
@@ -100,6 +101,7 @@ export async function runColabTransportTests() {
       }
 
       if (command?.endsWith('/uv') || command === 'uv') {
+        uvCalls.push(args.slice(execIndex + 2));
         colabInstalled = true;
         return result();
       }
@@ -131,6 +133,18 @@ export async function runColabTransportTests() {
     assert.equal(installed.transport.id, 'wsl');
     assert.equal(installed.installer, 'uv');
     assert.equal(uvBootstrapCalls, 1, 'missing uv should be bootstrapped exactly once through the official installer');
+    assert.equal(uvCalls.length, 1);
+    assert.deepEqual(uvCalls[0].slice(0, 4), [
+      'tool',
+      'install',
+      'google-colab-cli',
+      '--with',
+    ]);
+    assert.match(
+      uvCalls[0][4],
+      /^jupyter-kernel-client @ git\+https:\/\/github\.com\/googlecolab\/jupyter-kernel-client\.git@[0-9a-f]{40}$/,
+      'uv installs must override the incompatible PyPI package with the official pinned Google Colab fork',
+    );
 
     const afterInstall = resolveColabRuntime({
       env: wslEnv,
@@ -153,6 +167,52 @@ export async function runColabTransportTests() {
     assert.ok(
       colabCalls.some((args) => args[0] === '--auth=oauth2' && args[1] === 'sessions'),
       'managed read-only access checks must use the explicit oauth2 provider',
+    );
+
+    let pipxColabInstalled = false;
+    const pipxCalls = [];
+    const pipxRunner = (_name, args) => {
+      if (args[0] === '--list') return result({ stdout: 'Ubuntu\r\n' });
+      const execIndex = args.indexOf('--exec');
+      const command = execIndex >= 0 ? args[execIndex + 1] : null;
+
+      if (command === '/bin/sh') {
+        const isResolver = args.includes('remote-compute');
+        if (!isResolver) return result();
+        const requested = args.at(-1);
+        if (requested === 'sh') return result({ stdout: '/bin/sh\n' });
+        if (requested === 'pipx') return result({ stdout: '/usr/bin/pipx\n' });
+        if (requested === 'colab' && pipxColabInstalled) {
+          return result({ stdout: '/home/test/.local/bin/colab\n' });
+        }
+        return result({ ok: false, stderr: 'missing\n' });
+      }
+
+      if (command?.endsWith('/pipx') || command === 'pipx') {
+        const forwarded = args.slice(execIndex + 2);
+        pipxCalls.push(forwarded);
+        if (forwarded[0] === 'inject') pipxColabInstalled = true;
+        return result();
+      }
+      return result();
+    };
+
+    const pipxInstalled = installColabCli({
+      env: wslEnv,
+      platform: 'win32',
+      cwd: 'Z:\\repo',
+      runner: pipxRunner,
+      output: quietOutput,
+    });
+    assert.equal(pipxInstalled.ok, true);
+    assert.equal(pipxInstalled.installer, 'pipx');
+    assert.equal(pipxCalls.length, 2);
+    assert.deepEqual(pipxCalls[0], ['install', 'google-colab-cli']);
+    assert.deepEqual(pipxCalls[1].slice(0, 3), ['inject', '--force', 'google-colab-cli']);
+    assert.match(
+      pipxCalls[1][3],
+      /^jupyter-kernel-client @ git\+https:\/\/github\.com\/googlecolab\/jupyter-kernel-client\.git@[0-9a-f]{40}$/,
+      'pipx fallback must inject the official pinned Google Colab fork',
     );
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });

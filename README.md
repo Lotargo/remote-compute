@@ -91,7 +91,7 @@ On Linux and macOS, Colab is used natively. On Windows, native Colab is preferre
 
 No Docker runtime is required.
 
-Colab installation prefers `uv tool install google-colab-cli`. If `uv` is missing, `remote-compute` can bootstrap Astral's official standalone `uv` installer into the provider user's `~/.local/bin` without modifying shell profiles, then install Colab through `uv`. Existing `pipx` is used as a fallback. The installer intentionally does **not** use `pip --break-system-packages` to bypass PEP 668 protections.
+Colab installation prefers `uv tool install google-colab-cli` and explicitly supplies the official pinned `googlecolab/jupyter-kernel-client` fork required by Colab CLI. This avoids resolving the incompatible same-named PyPI package. If `uv` is missing, `remote-compute` can bootstrap Astral's official standalone `uv` installer into the provider user's `~/.local/bin` without modifying shell profiles, then install Colab through `uv`. Existing `pipx` is used as a fallback and injects the same pinned fork. The installer intentionally does **not** use `pip --break-system-packages` to bypass PEP 668 protections.
 
 ## Install
 
