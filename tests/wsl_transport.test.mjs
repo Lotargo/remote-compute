@@ -78,7 +78,7 @@ export async function runWslTransportTests() {
       const windowsPath = args.at(-1);
       return okResult(`/translated/${windowsPath.replace(/[:\\]/g, '_')}\n`);
     }
-    if (command === 'colab') return okResult('session-list\n');
+    if (command?.endsWith('/colab') || command === 'colab') return okResult('session-list\n');
     return okResult();
   };
 
@@ -95,7 +95,10 @@ export async function runWslTransportTests() {
 
     const providerRun = created.transport.run('colab', ['sessions']);
     assert.equal(providerRun.ok, true);
-    const providerCall = calls.find((args) => args.includes('colab') && args.includes('sessions'));
+    const providerCall = calls.find((args) => (
+      args.includes('sessions')
+      && args.some((arg) => arg === 'colab' || arg.endsWith('/colab'))
+    ));
     assert.ok(providerCall, 'provider command should be executed through wsl.exe');
     assert.ok(providerCall.includes('F:\\projects\\repo'), 'Windows cwd should be passed to WSL via --cd');
 
