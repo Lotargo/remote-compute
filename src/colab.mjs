@@ -1,4 +1,6 @@
-import { cliFailureMessage, resolveClientExecutable, runClientCli } from './client_cli.mjs';
+import { cliFailureMessage } from './client_cli.mjs';
+import { createNativeTransport } from './transports/native.mjs';
+import { createWslTransport } from './transports/wsl.mjs';
 
 const COLAB_INSTALLERS = Object.freeze([
   Object.freeze({ command: 'uv', args: ['tool', 'install', 'google-colab-cli'] }),
@@ -13,48 +15,119 @@ const COLAB_SCOPES = [
   'https://www.googleapis.com/auth/colaboratory',
 ].join(',');
 
-export function getColabExecutable({ env = process.env, platform = process.platform } = {}) {
-  return resolveClientExecutable('colab', { env, platform });
+export function resolveColabRuntime({
+  env = process.env,
+  platform = process.platform,
+  cwd = process.cwd(),
+  runner,
+} = {}) {
+  const native = createNativeTransport({ env, platform, cwd });
+  const nativeColab = native.resolve('colab');
+  if (nativeColab) {
+    return {
+      ok: true,
+      mode: 'native',
+      transport: native,
+      executable: nativeColab,
+      label: `native (${nativeColab})`,
+    };
+  }
+
+  if (platform !== 'win32') {
+    return {
+      ok: false,
+      reason: 'missing_colab',
+      mode: 'native',
+      transport: native,
+      executable: null,
+    };
+  }
+
+  const wsl = createWslTransport({ env, platform, cwd, runner });
+  if (!wsl.ok) {
+    return {
+      ok: false,
+      reason: wsl.reason,
+      mode: 'wsl',
+      transport: null,
+      executable: null,
+      wsl,
+    };
+  }
+
+  const wslColab = wsl.transport.resolve('colab');
+  if (!wslColab) {
+    return {
+      ok: false,
+      reason: 'missing_colab_wsl',
+      mode: 'wsl',
+      transport: wsl.transport,
+      executable: null,
+      wsl,
+    };
+  }
+
+  return {
+    ok: true,
+    mode: 'wsl',
+    transport: wsl.transport,
+    executable: wslColab,
+    label: `${wsl.transport.label} (${wslColab})`,
+    wsl,
+  };
+}
+
+export function getColabExecutable(options = {}) {
+  const runtime = resolveColabRuntime(options);
+  return runtime.ok ? runtime.executable : null;
 }
 
 export function checkColabAccess({
   env = process.env,
   platform = process.platform,
   cwd = process.cwd(),
+  runner,
 } = {}) {
-  const executable = getColabExecutable({ env, platform });
-  if (!executable) return { ok: false, reason: 'missing', executable: null };
+  const runtime = resolveColabRuntime({ env, platform, cwd, runner });
+  if (!runtime.ok) {
+    return {
+      ok: false,
+      reason: runtime.reason,
+      executable: null,
+      runtime,
+    };
+  }
 
-  const result = runClientCli('colab', ['sessions'], {
-    env,
-    platform,
+  const result = runtime.transport.run('colab', ['sessions'], {
     cwd,
     timeout: 30_000,
   });
 
-  if (result.ok) return { ok: true, executable };
+  if (result.ok) {
+    return {
+      ok: true,
+      executable: runtime.executable,
+      runtime,
+    };
+  }
+
   return {
     ok: false,
     reason: 'auth_or_provider',
-    executable,
+    executable: runtime.executable,
+    runtime,
     detail: cliFailureMessage(result),
   };
 }
 
-export function installColabCli({
-  env = process.env,
-  platform = process.platform,
-  cwd = process.cwd(),
+function installIntoTransport(transport, {
   output = console,
 } = {}) {
   for (const installer of COLAB_INSTALLERS) {
-    if (!resolveClientExecutable(installer.command, { env, platform })) continue;
+    if (!transport.resolve(installer.command)) continue;
 
-    output.log(`Installing google-colab-cli with ${installer.command}...`);
-    const result = runClientCli(installer.command, installer.args, {
-      env,
-      platform,
-      cwd,
+    output.log(`Installing google-colab-cli with ${installer.command} via ${transport.label}...`);
+    const result = transport.run(installer.command, installer.args, {
       timeout: 300_000,
       inherit: true,
     });
@@ -64,19 +137,63 @@ export function installColabCli({
       continue;
     }
 
-    const colab = getColabExecutable({ env, platform });
+    const colab = transport.resolve('colab');
     if (colab) {
-      output.log(`✓ Colab CLI installed: ${colab}`);
-      return { ok: true, executable: colab, installer: installer.command };
+      output.log(`✓ Colab CLI installed via ${transport.label}: ${colab}`);
+      return {
+        ok: true,
+        executable: colab,
+        installer: installer.command,
+        transport,
+      };
     }
 
-    output.warn('! Installation completed, but `colab` is not visible on PATH in this process yet.');
-    return { ok: true, executable: null, installer: installer.command, pathRefreshNeeded: true };
+    output.warn('! Installation completed, but `colab` is not visible to the selected transport yet.');
+    return {
+      ok: true,
+      executable: null,
+      installer: installer.command,
+      transport,
+      pathRefreshNeeded: true,
+    };
   }
 
-  output.error('Could not install google-colab-cli automatically. Install `uv` or Python first, then run:');
-  output.error('  uv tool install google-colab-cli');
-  return { ok: false, executable: null };
+  output.error(`Could not install google-colab-cli through ${transport.label}. Install uv or Python in that environment first.`);
+  return { ok: false, executable: null, reason: 'missing_installer', transport };
+}
+
+export function installColabCli({
+  env = process.env,
+  platform = process.platform,
+  cwd = process.cwd(),
+  output = console,
+  runner,
+} = {}) {
+  const existing = resolveColabRuntime({ env, platform, cwd, runner });
+  if (existing.ok) {
+    return {
+      ok: true,
+      executable: existing.executable,
+      transport: existing.transport,
+      alreadyInstalled: true,
+    };
+  }
+
+  if (platform === 'win32') {
+    const wsl = createWslTransport({ env, platform, cwd, runner });
+    if (!wsl.ok) {
+      return {
+        ok: false,
+        executable: null,
+        reason: wsl.reason,
+        wsl,
+      };
+    }
+    return installIntoTransport(wsl.transport, { output });
+  }
+
+  const native = createNativeTransport({ env, platform, cwd });
+  return installIntoTransport(native, { output });
 }
 
 export function authenticateColab({
@@ -84,44 +201,100 @@ export function authenticateColab({
   platform = process.platform,
   cwd = process.cwd(),
   output = console,
+  runner,
 } = {}) {
-  const colab = getColabExecutable({ env, platform });
-  if (!colab) {
-    return { ok: false, reason: 'missing_colab' };
+  const runtime = resolveColabRuntime({ env, platform, cwd, runner });
+  if (!runtime.ok) {
+    return {
+      ok: false,
+      reason: runtime.reason === 'missing_colab_wsl' ? 'missing_colab' : runtime.reason,
+      runtime,
+    };
   }
 
-  const existing = checkColabAccess({ env, platform, cwd });
-  if (existing.ok) return { ok: true, alreadyAuthenticated: true };
+  const existing = checkColabAccess({ env, platform, cwd, runner });
+  if (existing.ok) {
+    return {
+      ok: true,
+      alreadyAuthenticated: true,
+      runtime,
+    };
+  }
 
-  const gcloud = resolveClientExecutable('gcloud', { env, platform });
-  if (!gcloud) return { ok: false, reason: 'missing_gcloud' };
+  const gcloud = runtime.transport.resolve('gcloud');
+  if (!gcloud) {
+    return {
+      ok: false,
+      reason: 'missing_gcloud',
+      runtime,
+    };
+  }
 
-  output.log('Opening the official Google Application Default Credentials flow...');
-  const login = runClientCli('gcloud', [
+  output.log(`Opening the official Google Application Default Credentials flow via ${runtime.transport.label}...`);
+  const login = runtime.transport.run('gcloud', [
     'auth',
     'application-default',
     'login',
     `--scopes=${COLAB_SCOPES}`,
   ], {
-    env,
-    platform,
     cwd,
     timeout: 300_000,
     inherit: true,
   });
 
   if (!login.ok) {
-    return { ok: false, reason: 'gcloud_auth_failed', detail: cliFailureMessage(login) };
+    return {
+      ok: false,
+      reason: 'gcloud_auth_failed',
+      runtime,
+      detail: cliFailureMessage(login),
+    };
   }
 
-  const verified = checkColabAccess({ env, platform, cwd });
+  const verified = checkColabAccess({ env, platform, cwd, runner });
   if (!verified.ok) {
     return {
       ok: false,
       reason: 'verification_failed',
+      runtime,
       detail: verified.detail,
     };
   }
 
-  return { ok: true, alreadyAuthenticated: false };
+  return {
+    ok: true,
+    alreadyAuthenticated: false,
+    runtime,
+  };
+}
+
+export function forwardColab(args = [], {
+  env = process.env,
+  platform = process.platform,
+  cwd = process.cwd(),
+  runner,
+} = {}) {
+  const runtime = resolveColabRuntime({ env, platform, cwd, runner });
+  if (!runtime.ok) {
+    return {
+      ok: false,
+      reason: runtime.reason,
+      runtime,
+      status: null,
+    };
+  }
+
+  const result = runtime.transport.run('colab', args, {
+    cwd,
+    timeout: null,
+    inherit: true,
+  });
+
+  return {
+    ok: result.ok,
+    status: result.status,
+    reason: result.ok ? null : 'provider_failed',
+    runtime,
+    detail: result.ok ? null : cliFailureMessage(result),
+  };
 }
