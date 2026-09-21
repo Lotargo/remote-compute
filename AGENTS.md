@@ -7,7 +7,7 @@
 The core boundary is simple:
 
 - the host agent owns planning, delegation, permissions, retries, tool choice, and verification;
-- the official provider tooling owns provider semantics, provisioning, and remote execution;
+- the official provider tooling owns provider semantics, provisioning, remote execution, and provider-native storage integrations;
 - `remote-compute` owns installation, skill policy, diagnostics, authentication handoff, and deterministic platform compatibility.
 
 ## Architectural constraints
@@ -89,6 +89,16 @@ The current provider is Google Colab through the official `google-colab-cli` / `
 - Never store, proxy, log, print, commit, or copy OAuth tokens, refresh tokens, cookies, authorization codes, service-account secrets, or ADC credential files.
 - Do not copy credentials between Windows and WSL.
 - Access verification should use a harmless provider query such as `colab sessions` and must not claim success merely because login started.
+
+### Persistent storage and Google Drive
+
+- Use the official Colab CLI's `drivemount` capability for Google Drive access; do not add a parallel Drive API client or `remote-compute drive` subsystem while provider-native mounting is sufficient.
+- Use provider-native upload/download for small one-off transfers where mounting persistent storage would add unnecessary interaction.
+- Treat Drive mounting as interactive. It may require browser consent and a terminal confirmation, so non-interactive agents must ask the user to complete that step instead of hanging on a prompt.
+- Do not assume Drive is mounted merely because a Colab session exists; verify the mount before starting work that depends on it.
+- Keep lifecycle roles distinct: Git for reproducible source, upload/download for disposable transfer, Drive for durable large assets/checkpoints/shared outputs, and VM-local disk for the hot working set.
+- For compute-heavy I/O, copy the hot subset from Drive to VM-local storage before repeated access. Persist important checkpoints/artifacts back to external storage at useful recovery points.
+- Provider storage command syntax belongs to the official CLI. Teach agents to inspect `remote-compute colab help drivemount` rather than duplicating a large static reference here.
 
 ## Security and user-state boundaries
 
