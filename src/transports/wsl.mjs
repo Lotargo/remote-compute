@@ -127,6 +127,7 @@ export function runWslCommand(command, args = [], {
   distro = null,
   timeout = 20_000,
   inherit = false,
+  bridgeCwd = true,
   runner = runClientCli,
 } = {}) {
   if (platform !== 'win32') {
@@ -142,7 +143,8 @@ export function runWslCommand(command, args = [], {
   }
 
   const selected = requestedDistribution({ env, distro });
-  return runner('wsl', buildWslExecArgs(command, args, { distro: selected, cwd }), {
+  const wslCwd = bridgeCwd ? cwd : null;
+  return runner('wsl', buildWslExecArgs(command, args, { distro: selected, cwd: wslCwd }), {
     env,
     platform,
     cwd,
@@ -172,6 +174,7 @@ export function resolveWslCommand(command, {
     cwd,
     distro: state.distro,
     timeout: 15_000,
+    bridgeCwd: false,
     runner,
   });
 
@@ -216,6 +219,7 @@ export function windowsPathToWsl(windowsPath, {
     cwd,
     distro: state.distro,
     timeout: 15_000,
+    bridgeCwd: false,
     runner,
   });
   if (!result.ok) {
@@ -264,6 +268,7 @@ export function createWslTransport({
         distro: state.distro,
         timeout: options.timeout,
         inherit: options.inherit ?? false,
+        bridgeCwd: options.bridgeCwd ?? true,
         runner,
       });
     },
