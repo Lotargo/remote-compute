@@ -10,6 +10,7 @@ import { HOST_DEFINITIONS } from '../src/hosts.mjs';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PACKAGE_PATH = join(ROOT, 'package.json');
 const SKILL_PATH = join(ROOT, 'skills', 'remote-compute', 'SKILL.md');
+const CHANGELOG_PATH = join(ROOT, 'CHANGELOG.md');
 const WSL_TRANSPORT_PATH = join(ROOT, 'src', 'transports', 'wsl.mjs');
 
 function normalizeNewlines(value) {
@@ -25,9 +26,10 @@ export async function runContractTests() {
   assert.equal(pkg.bin?.['remote-compute'], 'bin/remote-compute.mjs');
   assert.equal(existsSync(join(ROOT, pkg.bin['remote-compute'])), true, 'package bin target must exist');
 
-  for (const path of ['bin', 'src', 'skills', 'README.md']) {
+  for (const path of ['bin', 'src', 'skills', 'README.md', 'CHANGELOG.md']) {
     assert.ok(pkg.files?.includes(path), `package files must include ${path}`);
   }
+  assert.equal(existsSync(CHANGELOG_PATH), true, 'CHANGELOG.md must exist for releases');
 
   for (const path of [
     'src/transports/native.mjs',
@@ -74,6 +76,11 @@ export async function runContractTests() {
   assert.match(skill, /official `colab` CLI/i);
   assert.match(skill, /remote-compute colab skill/);
   assert.match(skill, /remote-compute wsl-path/);
+
+  const changelog = normalizeNewlines(await readFile(CHANGELOG_PATH, 'utf8'));
+  assert.match(changelog, /## \[0\.1\.0\] - 2026-09-22/);
+  assert.match(changelog, /Windows -> WSL/i);
+  assert.match(changelog, /OAuth2/i);
 
   const wslSource = normalizeNewlines(await readFile(WSL_TRANSPORT_PATH, 'utf8'));
   assert.match(wslSource, /wslpath/);
