@@ -71,11 +71,13 @@ export async function runColabTransportTests() {
         return result({ ok: false, stderr: 'missing\n' });
       }
 
-      if (command === 'uv') {
+      if (command?.endsWith('/uv') || command === 'uv') {
         colabInstalled = true;
         return result();
       }
-      if (command === 'colab' && args.includes('sessions')) return result({ stdout: '[]\n' });
+      if ((command?.endsWith('/colab') || command === 'colab') && args.includes('sessions')) {
+        return result({ stdout: '[]\n' });
+      }
       return result();
     };
 
