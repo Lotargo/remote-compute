@@ -4,8 +4,13 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
-import { resolveClientExecutable } from './client_cli.mjs';
-import { authenticateColab, checkColabAccess, getColabExecutable, installColabCli } from './colab.mjs';
+import {
+  authenticateColab,
+  checkColabAccess,
+  forwardColab,
+  installColabCli,
+  resolveColabRuntime,
+} from './colab.mjs';
 import {
   HOST_DEFINITIONS,
   detectHosts,
@@ -15,6 +20,7 @@ import {
   selectKnownHosts,
 } from './hosts.mjs';
 import { inspectSkillDir, installSkillTargets, removeSkillTargets } from './skills.mjs';
+import { createWslTransport, installWsl, inspectWsl, windowsPathToWsl } from './transports/wsl.mjs';
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGED_SKILL_DIR = join(PACKAGE_ROOT, 'skills', 'remote-compute');
@@ -23,9 +29,11 @@ function printHelp() {
   console.log(`remote-compute
 
 Usage:
-  remote-compute setup [host flags] [--install-colab] [--yes] [--force]
-  remote-compute doctor [host flags]
-  remote-compute auth
+  remote-compute setup [host flags] [--install-colab] [--install-wsl] [--wsl-distro <name>] [--yes] [--force]
+  remote-compute doctor [host flags] [--wsl-distro <name>]
+  remote-compute auth [--wsl-distro <name>]
+  remote-compute colab <provider args...>
+  remote-compute wsl-path <absolute Windows path> [--wsl-distro <name>]
   remote-compute uninstall [host flags] [--dry-run]
   remote-compute help
 
@@ -37,19 +45,37 @@ Host flags:
   (no flag)     Setup/doctor detected hosts; uninstall checks all known host paths
 
 Setup options:
-  --install-colab  Install the official google-colab-cli if it is missing
-  --yes            Non-interactive mode; does not imply --install-colab
-  --force          Refresh a managed skill that differs from the packaged copy
+  --install-colab       Install the official google-colab-cli if it is missing
+  --install-wsl         On Windows, install WSL + the selected distro when missing
+  --wsl-distro <name>   Use a specific installed WSL distro (default: Windows WSL default)
+  --yes                 Non-interactive mode; does not imply installation flags
+  --force               Refresh a managed skill that differs from the packaged copy
 
 Uninstall options:
-  --dry-run        Preview owned skill directories that would be removed
+  --dry-run             Preview owned skill directories that would be removed
 
 Commands:
-  setup       Detect agent hosts, install the remote-compute skill, and check Colab
-  doctor      Validate host integration, skill ownership, provider CLI, and auth
-  auth        Run Google's official ADC browser flow and verify Colab access
+  setup       Detect agent hosts, install the skill, and prepare the provider transport
+  doctor      Validate host integration, provider transport, Colab CLI, and auth
+  auth        Run Google's official ADC flow through the selected provider transport
+  colab       Transparent passthrough to the official Colab CLI (native or WSL)
+  wsl-path    Ask WSL/wslpath to translate an absolute Windows path; no drive letters are hardcoded
   uninstall   Remove only unmodified skill directories owned by remote-compute
 `);
+}
+
+function flagValue(args, flag) {
+  const index = args.indexOf(flag);
+  if (index === -1 || index + 1 >= args.length) return null;
+  const value = args[index + 1];
+  if (String(value).startsWith('--')) return null;
+  return value;
+}
+
+function providerEnvForArgs(args) {
+  const distro = flagValue(args, '--wsl-distro');
+  if (!distro) return process.env;
+  return { ...process.env, REMOTE_COMPUTE_WSL_DISTRO: distro };
 }
 
 function printHosts(hosts, { requested = new Set() } = {}) {
@@ -81,11 +107,62 @@ function missingRequestedHosts(hosts, args) {
   return hosts.filter((host) => requested.has(host.id) && !host.path);
 }
 
+function wslSetupDetail(reason) {
+  switch (reason) {
+    case 'missing_wsl':
+      return 'wsl.exe was not found on PATH';
+    case 'wsl_unavailable':
+      return 'WSL exists but is not ready';
+    case 'no_distribution':
+      return 'WSL has no installed Linux distribution';
+    case 'requested_distribution_missing':
+      return 'the requested WSL distribution is not installed';
+    default:
+      return reason || 'WSL is not ready';
+  }
+}
+
+async function ensureWindowsTransport(args, env) {
+  if (process.platform !== 'win32') return { ok: true, changed: false };
+
+  const runtime = resolveColabRuntime({ env });
+  if (runtime.ok || runtime.reason === 'missing_colab_wsl') {
+    return { ok: true, changed: false, runtime };
+  }
+
+  const installRequested = args.includes('--install-wsl');
+  const yes = args.includes('--yes');
+  let shouldInstall = installRequested;
+  if (!yes && !installRequested) {
+    shouldInstall = await askYesNo(
+      `Windows needs WSL as the Colab compatibility backend (${wslSetupDetail(runtime.reason)}). Install WSL now?`,
+      false,
+    );
+  }
+
+  if (!shouldInstall) {
+    return { ok: false, changed: false, reason: runtime.reason, runtime };
+  }
+
+  const distro = flagValue(args, '--wsl-distro') || 'Ubuntu';
+  const installed = installWsl({ env, distro });
+  if (!installed.ok) {
+    console.error(`! WSL installation failed${installed.detail ? `: ${installed.detail}` : `: ${installed.reason}`}`);
+    return { ok: false, changed: false, reason: installed.reason };
+  }
+
+  console.log(`✓ WSL installation requested for ${distro}.`);
+  console.log('  Windows may require a restart, and a newly installed distro may require one-time user initialization.');
+  console.log('  After that, rerun `remote-compute setup --install-colab`.');
+  return { ok: false, changed: true, reason: 'wsl_install_requested' };
+}
+
 async function setup(args) {
   const yes = args.includes('--yes');
   const force = args.includes('--force');
   const installRequested = args.includes('--install-colab');
   const requested = requestedHostIds(args);
+  const providerEnv = providerEnvForArgs(args);
 
   console.log('remote-compute setup\n');
 
@@ -108,34 +185,44 @@ async function setup(args) {
   await installSkillTargets(targets, PACKAGED_SKILL_DIR, { force });
 
   if (process.platform === 'win32') {
-    console.warn('\n! Native Windows detected. The upstream Colab CLI currently requires Linux or macOS; use remote-compute from WSL.');
-  }
-
-  let colab = getColabExecutable();
-  if (!colab) {
-    console.warn('\n! Google Colab CLI is not installed or is not visible on PATH.');
-    let shouldInstall = installRequested;
-    if (!yes && !installRequested && process.platform !== 'win32') {
-      shouldInstall = await askYesNo('Install the official google-colab-cli now?');
-    }
-
-    if (shouldInstall && process.platform !== 'win32') {
-      const installed = installColabCli();
-      colab = installed.executable;
+    console.log('\nProvider transport');
+    const prepared = await ensureWindowsTransport(args, providerEnv);
+    if (!prepared.ok && prepared.changed) return;
+    if (!prepared.ok) {
+      console.warn(`! WSL transport is not ready: ${wslSetupDetail(prepared.reason)}.`);
+      console.warn('  Run `remote-compute setup --install-wsl`, or install/initialize WSL manually.');
     }
   }
 
-  if (colab) {
-    console.log(`\n✓ Colab CLI: ${colab}`);
-    const access = checkColabAccess();
+  let runtime = resolveColabRuntime({ env: providerEnv });
+  if (!runtime.ok) {
+    const readyForInstall = runtime.reason === 'missing_colab' || runtime.reason === 'missing_colab_wsl';
+    if (readyForInstall) {
+      console.warn(`\n! Google Colab CLI is not installed in the selected ${runtime.mode || 'provider'} environment.`);
+      let shouldInstall = installRequested;
+      if (!yes && !installRequested) {
+        shouldInstall = await askYesNo('Install the official google-colab-cli now?');
+      }
+
+      if (shouldInstall) {
+        const installed = installColabCli({ env: providerEnv });
+        if (installed.ok) runtime = resolveColabRuntime({ env: providerEnv });
+      }
+    }
+  }
+
+  if (runtime.ok) {
+    console.log(`\n✓ Provider transport: ${runtime.transport.label}`);
+    console.log(`✓ Colab CLI: ${runtime.executable}`);
+    const access = checkColabAccess({ env: providerEnv });
     if (access.ok) {
       console.log('✓ Colab authentication/access check passed.');
     } else {
       console.log(`· Colab access is not ready yet${access.detail ? `: ${access.detail}` : '.'}`);
       console.log('  Run: remote-compute auth');
     }
-  } else if (process.platform !== 'win32') {
-    console.log('\nNext step: install the official Colab CLI, then run `remote-compute auth`.');
+  } else if (runtime.reason !== 'missing_wsl' && runtime.reason !== 'wsl_unavailable' && runtime.reason !== 'no_distribution') {
+    console.log('\nNext step: prepare the provider environment, then run `remote-compute auth`.');
   }
 
   console.log('\nSetup complete. Restart/reload your agent CLI if it does not notice the new skill immediately.');
@@ -151,6 +238,7 @@ async function doctor(args) {
   };
 
   const requested = requestedHostIds(args);
+  const providerEnv = providerEnvForArgs(args);
   const hosts = detectHosts();
   printHosts(hosts, { requested });
   console.log('');
@@ -182,25 +270,49 @@ async function doctor(args) {
   }
 
   console.log('\nProvider: Google Colab');
-  const colab = getColabExecutable();
-  if (!colab) {
-    record('FAIL', 'Colab CLI', 'not found on PATH');
+  const runtime = resolveColabRuntime({ env: providerEnv });
+
+  if (process.platform === 'win32' && runtime.mode === 'wsl') {
+    const wsl = inspectWsl({ env: providerEnv });
+    if (wsl.ok) {
+      record('OK', 'WSL', wsl.executable);
+      record('OK', 'WSL distribution', wsl.distro || 'Windows default distribution');
+    } else {
+      record('FAIL', 'WSL transport', wslSetupDetail(wsl.reason));
+      if (wsl.requestedDistribution) {
+        record('INFO', 'Requested WSL distribution', wsl.requestedDistribution);
+      }
+    }
+  }
+
+  if (!runtime.ok) {
+    if (runtime.reason === 'missing_colab_wsl' && runtime.transport) {
+      record('OK', 'Provider transport', runtime.transport.label);
+      record('FAIL', 'Colab CLI', 'not installed inside WSL; run `remote-compute setup --install-colab`');
+    } else if (runtime.reason === 'missing_colab') {
+      record('FAIL', 'Colab CLI', 'not found on PATH');
+    } else if (runtime.reason !== 'missing_colab_wsl') {
+      record('FAIL', 'Provider transport', wslSetupDetail(runtime.reason));
+    }
   } else {
-    record('OK', 'Colab CLI', colab);
-    const access = checkColabAccess();
+    record('OK', 'Provider transport', runtime.transport.label);
+    record('OK', 'Colab CLI', runtime.executable);
+    const access = checkColabAccess({ env: providerEnv });
     if (access.ok) record('OK', 'Colab authentication/access', 'read-only sessions query succeeded');
     else record('FAIL', 'Colab authentication/access', access.detail || 'run `remote-compute auth`');
   }
 
-  const gcloud = resolveClientExecutable('gcloud');
-  if (gcloud) record('INFO', 'gcloud', gcloud);
-  else record('INFO', 'gcloud', 'not installed; only needed for the recommended auth flow');
-
-  if (process.platform === 'win32') {
-    record('FAIL', 'Platform', 'native Windows; use WSL for the upstream Colab CLI');
+  const providerTransport = runtime.transport
+    || (process.platform === 'win32' ? createWslTransport({ env: providerEnv }).transport : null);
+  if (providerTransport) {
+    const gcloud = providerTransport.resolve('gcloud');
+    if (gcloud) record('INFO', 'gcloud', `${providerTransport.label}: ${gcloud}`);
+    else record('INFO', 'gcloud', `not installed in ${providerTransport.label}; needed for the recommended auth flow`);
   } else {
-    record('OK', 'Platform', process.platform);
+    record('INFO', 'gcloud', 'provider transport unavailable');
   }
+
+  record('OK', 'Platform', process.platform === 'win32' ? 'win32 (WSL bridge supported)' : process.platform);
 
   const failures = checks.filter((check) => check.level === 'FAIL').length;
   const warnings = checks.filter((check) => check.level === 'WARN').length;
@@ -209,24 +321,33 @@ async function doctor(args) {
   if (failures > 0) process.exitCode = 1;
 }
 
-async function auth() {
-  const result = authenticateColab();
+async function auth(args) {
+  const providerEnv = providerEnvForArgs(args);
+  const result = authenticateColab({ env: providerEnv });
 
   if (result.ok) {
     console.log(result.alreadyAuthenticated
-      ? '✓ Colab authentication already works.'
-      : '✓ Colab authentication verified.');
+      ? `✓ Colab authentication already works via ${result.runtime.transport.label}.`
+      : `✓ Colab authentication verified via ${result.runtime.transport.label}.`);
     return;
   }
 
   switch (result.reason) {
     case 'missing_colab':
-      console.error('Google Colab CLI is missing. Install it first with `uv tool install google-colab-cli`.');
+      console.error('Google Colab CLI is missing in the selected provider environment. Run `remote-compute setup --install-colab`.');
+      process.exitCode = 2;
+      break;
+    case 'missing_wsl':
+    case 'wsl_unavailable':
+    case 'no_distribution':
+    case 'requested_distribution_missing':
+      console.error(`WSL provider transport is not ready: ${wslSetupDetail(result.reason)}.`);
+      console.error('Run `remote-compute setup --install-wsl --install-colab`.');
       process.exitCode = 2;
       break;
     case 'missing_gcloud':
-      console.error('`gcloud` is required for the recommended ADC authentication flow but was not found on PATH.');
-      console.error('Install Google Cloud CLI, then rerun `remote-compute auth`.');
+      console.error('`gcloud` is required in the same environment as the Colab CLI for the recommended ADC flow.');
+      console.error('Install Google Cloud CLI there, then rerun `remote-compute auth`.');
       console.error('remote-compute never stores Google credentials itself.');
       process.exitCode = 2;
       break;
@@ -236,13 +357,58 @@ async function auth() {
       break;
     case 'verification_failed':
       console.error(`Authentication finished, but Colab verification still failed${result.detail ? `: ${result.detail}` : '.'}`);
-      console.error('Run `colab skill` / `colab help` for upstream diagnostics.');
+      console.error('Run `remote-compute colab skill` / `remote-compute colab help` for upstream diagnostics.');
       process.exitCode = 1;
       break;
     default:
       console.error(`Colab authentication failed${result.detail ? `: ${result.detail}` : '.'}`);
       process.exitCode = 1;
   }
+}
+
+function providerArgs(args) {
+  const result = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === '--wsl-distro') {
+      index += 1;
+      continue;
+    }
+    result.push(args[index]);
+  }
+  return result;
+}
+
+function colab(args) {
+  const providerEnv = providerEnvForArgs(args);
+  const forwarded = forwardColab(providerArgs(args), { env: providerEnv });
+  if (forwarded.ok) return;
+
+  if (forwarded.reason === 'missing_colab_wsl' || forwarded.reason === 'missing_colab') {
+    console.error('Colab CLI is not installed in the selected provider environment. Run `remote-compute setup --install-colab`.');
+  } else if (['missing_wsl', 'wsl_unavailable', 'no_distribution', 'requested_distribution_missing'].includes(forwarded.reason)) {
+    console.error(`WSL provider transport is not ready: ${wslSetupDetail(forwarded.reason)}.`);
+  } else {
+    console.error(`Colab command failed${forwarded.detail ? `: ${forwarded.detail}` : '.'}`);
+  }
+  process.exitCode = forwarded.status || 1;
+}
+
+function wslPath(args) {
+  const path = args.find((arg, index) => arg !== '--wsl-distro' && args[index - 1] !== '--wsl-distro');
+  if (!path) {
+    console.error('Usage: remote-compute wsl-path <absolute Windows path> [--wsl-distro <name>]');
+    process.exitCode = 2;
+    return;
+  }
+
+  const env = providerEnvForArgs(args);
+  const translated = windowsPathToWsl(path, { env });
+  if (!translated.ok) {
+    console.error(`Unable to translate path: ${translated.detail || translated.reason}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(translated.path);
 }
 
 async function uninstall(args) {
@@ -257,7 +423,7 @@ async function uninstall(args) {
   const protectedCount = results.filter((result) => result.status === 'modified' || result.status === 'conflict').length;
 
   console.log(`\n${dryRun ? 'Preview' : 'Uninstall'} complete. ${removable} owned skill target(s) ${dryRun ? 'would be removed' : 'removed'}, ${protectedCount} protected.`);
-  console.log('Provider CLIs and Google credentials were left untouched.');
+  console.log('Provider CLIs, WSL distributions, and Google credentials were left untouched.');
 }
 
 export async function main(argv) {
@@ -272,7 +438,13 @@ export async function main(argv) {
       await doctor(args);
       break;
     case 'auth':
-      await auth();
+      await auth(args);
+      break;
+    case 'colab':
+      colab(args);
+      break;
+    case 'wsl-path':
+      wslPath(args);
       break;
     case 'uninstall':
       await uninstall(args);
