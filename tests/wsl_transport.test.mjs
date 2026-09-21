@@ -7,6 +7,7 @@ import {
   buildWslExecArgs,
   createWslTransport,
   inspectWsl,
+  installWsl,
   parseWslDistributionList,
   windowsPathToWsl,
 } from '../src/transports/wsl.mjs';
@@ -22,6 +23,12 @@ function okResult(stdout = '') {
     error: null,
   };
 }
+
+const quietOutput = Object.freeze({
+  log() {},
+  warn() {},
+  error() {},
+});
 
 export async function runWslTransportTests() {
   console.log('--- WSL transport ---');
@@ -62,6 +69,7 @@ export async function runWslTransportTests() {
   const runner = (_name, args) => {
     calls.push([...args]);
     if (args[0] === '--list') return okResult('Ubuntu\r\nDebian\r\n');
+    if (args[0] === '--install') return okResult();
 
     const execIndex = args.indexOf('--exec');
     const command = execIndex >= 0 ? args[execIndex + 1] : null;
@@ -109,6 +117,22 @@ export async function runWslTransportTests() {
         `path must be delegated to wslpath without hardcoded drive mapping: ${windowsPath}`,
       );
     }
+
+    const installed = installWsl({
+      env,
+      platform: 'win32',
+      cwd: 'C:\\work',
+      distro: 'Ubuntu',
+      output: quietOutput,
+      runner,
+    });
+    assert.equal(installed.ok, true);
+    assert.ok(calls.some((args) => (
+      args[0] === '--install'
+      && args.includes('--distribution')
+      && args.includes('Ubuntu')
+      && args.includes('--no-launch')
+    )), 'WSL setup should delegate installation to wsl.exe without Docker or custom VM logic');
 
     const missingDistro = inspectWsl({
       env: { ...env, REMOTE_COMPUTE_WSL_DISTRO: 'Fedora' },
