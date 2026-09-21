@@ -73,7 +73,7 @@ Claude Code
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 18.18+
 - at least one supported agent CLI
 - for the current provider: the official Google Colab CLI
 
@@ -225,23 +225,68 @@ The host-integration layer intentionally follows patterns already proven in `Lot
 
 There is still no custom Colab API client and no second harness.
 
-## Local development
+## Local development and verification
 
-No CI/CD or GitHub Actions are configured for now. Validation is intentionally local.
+No CI/CD or GitHub Actions are configured for now. Validation is intentionally local, but the local gate is comprehensive.
+
+Install development dependencies once:
+
+```bash
+npm install
+```
+
+The full verification pipeline runs:
+
+1. ESLint for semantic/static code-quality checks beyond syntax;
+2. `node --check` for every source and test entry point;
+3. unit/integration-style local tests;
+4. package/CLI/skill contract tests;
+5. cross-platform adapter/path tests;
+6. an `npm pack --dry-run` packaging check.
+
+Run everything with:
+
+```bash
+npm run verify
+```
+
+Platform wrappers are included so the same gate is easy to run from a native shell:
+
+```bash
+# Linux / macOS / WSL
+sh scripts/verify.sh
+```
+
+```bat
+:: Windows cmd.exe
+scripts\verify.bat
+```
+
+Useful focused commands:
+
+```bash
+npm run lint
+npm run lint:fix
+npm run check
+npm test
+npm run test:contracts
+npm run test:platform
+npm run package:check
+```
+
+The tests use temporary HOME/workspace/bin directories and fake CLIs so setup primitives can be exercised without modifying real Codex, AGY, OpenCode, or Claude Code configuration. Platform-sensitive helpers are also tested through injected platform/env values; running `verify.sh` and `verify.bat` on their native systems provides the final host-shell check.
+
+Typical local development loop:
 
 ```bash
 git clone https://github.com/Lotargo/remote-compute.git
 cd remote-compute
-
-npm run check
-npm test
+npm install
+npm run verify
 npm link
-
 remote-compute doctor
 remote-compute setup
 ```
-
-The tests use temporary HOME/workspace/bin directories and fake CLIs so setup primitives can be exercised without modifying real Codex, AGY, OpenCode, or Claude Code configuration.
 
 ## What this project intentionally does not do
 
