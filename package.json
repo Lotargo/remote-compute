@@ -1,7 +1,7 @@
 {
   "name": "@lotargo/remote-compute",
   "version": "0.1.0",
-  "description": "Bootstrap remote compute skills for Codex, AGY, Claude Code, and OpenCode without replacing their harnesses.",
+  "description": "Use Google Colab as remote compute from Codex, Claude Code, OpenCode, and AGY through the official Colab CLI.",
   "type": "module",
   "bin": {
     "remote-compute": "bin/remote-compute.mjs"
@@ -30,15 +30,21 @@
     "node": ">=18.18.0"
   },
   "keywords": [
-    "agents",
+    "google-colab",
+    "colab",
+    "colab-cli",
+    "remote-compute",
+    "cloud-computing",
+    "gpu",
+    "coding-agents",
+    "ai-agents",
+    "agent-skills",
     "codex",
     "claude-code",
     "opencode",
     "antigravity",
-    "colab",
-    "remote-compute",
-    "agent-skills",
-    "wsl"
+    "wsl",
+    "windows"
   ],
   "license": "UNLICENSED",
   "repository": {
