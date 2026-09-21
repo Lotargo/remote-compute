@@ -3,18 +3,21 @@ import { createNativeTransport } from './transports/native.mjs';
 import { createWslTransport } from './transports/wsl.mjs';
 
 const UV_INSTALL_URL = 'https://astral.sh/uv/install.sh';
+const DEFAULT_AUTH_PROVIDER = 'oauth2';
 
 const COLAB_INSTALLERS = Object.freeze([
   Object.freeze({ command: 'uv', args: ['tool', 'install', 'google-colab-cli'] }),
   Object.freeze({ command: 'pipx', args: ['install', 'google-colab-cli'] }),
 ]);
 
-const COLAB_SCOPES = [
-  'openid',
-  'https://www.googleapis.com/auth/cloud-platform',
-  'https://www.googleapis.com/auth/userinfo.email',
-  'https://www.googleapis.com/auth/colaboratory',
-].join(',');
+function hasExplicitAuth(args = []) {
+  return args.some((arg) => arg === '--auth' || String(arg).startsWith('--auth='));
+}
+
+export function withDefaultColabAuth(args = []) {
+  if (hasExplicitAuth(args)) return [...args];
+  return [`--auth=${DEFAULT_AUTH_PROVIDER}`, ...args];
+}
 
 export function resolveColabRuntime({
   env = process.env,
@@ -99,7 +102,7 @@ export function checkColabAccess({
     };
   }
 
-  const result = runtime.transport.run('colab', ['sessions'], {
+  const result = runtime.transport.run('colab', withDefaultColabAuth(['sessions']), {
     cwd,
     timeout: 30_000,
     bridgeCwd: false,
@@ -110,15 +113,20 @@ export function checkColabAccess({
       ok: true,
       executable: runtime.executable,
       runtime,
+      authProvider: DEFAULT_AUTH_PROVIDER,
     };
   }
 
+  const detail = cliFailureMessage(result);
+  const authRequired = /^aborted\.?$/i.test(detail.trim());
+
   return {
     ok: false,
-    reason: 'auth_or_provider',
+    reason: authRequired ? 'auth_required' : 'auth_or_provider',
     executable: runtime.executable,
     runtime,
-    detail: cliFailureMessage(result),
+    authProvider: DEFAULT_AUTH_PROVIDER,
+    detail: authRequired ? 'interactive Colab OAuth2 login is required' : detail,
   };
 }
 
@@ -292,27 +300,16 @@ export function authenticateColab({
       ok: true,
       alreadyAuthenticated: true,
       runtime,
+      authProvider: DEFAULT_AUTH_PROVIDER,
     };
   }
 
-  const gcloud = runtime.transport.resolve('gcloud');
-  if (!gcloud) {
-    return {
-      ok: false,
-      reason: 'missing_gcloud',
-      runtime,
-    };
-  }
+  output.log(`Starting the official Colab OAuth2 login via ${runtime.transport.label}...`);
+  output.log('Open the URL printed by Colab, sign in with Google, then paste the authorization code back into this terminal.');
 
-  output.log(`Opening the official Google Application Default Credentials flow via ${runtime.transport.label}...`);
-  const login = runtime.transport.run('gcloud', [
-    'auth',
-    'application-default',
-    'login',
-    `--scopes=${COLAB_SCOPES}`,
-  ], {
+  const login = runtime.transport.run('colab', withDefaultColabAuth(['sessions']), {
     cwd,
-    timeout: 300_000,
+    timeout: 10 * 60_000,
     inherit: true,
     bridgeCwd: false,
   });
@@ -320,7 +317,7 @@ export function authenticateColab({
   if (!login.ok) {
     return {
       ok: false,
-      reason: 'gcloud_auth_failed',
+      reason: 'oauth2_auth_failed',
       runtime,
       detail: cliFailureMessage(login),
     };
@@ -340,6 +337,7 @@ export function authenticateColab({
     ok: true,
     alreadyAuthenticated: false,
     runtime,
+    authProvider: DEFAULT_AUTH_PROVIDER,
   };
 }
 
@@ -359,7 +357,7 @@ export function forwardColab(args = [], {
     };
   }
 
-  const result = runtime.transport.run('colab', args, {
+  const result = runtime.transport.run('colab', withDefaultColabAuth(args), {
     cwd,
     timeout: null,
     inherit: true,
