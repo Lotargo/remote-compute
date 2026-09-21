@@ -57,7 +57,7 @@ Uninstall options:
 Commands:
   setup       Detect agent hosts, install the skill, and prepare the provider transport
   doctor      Validate host integration, provider transport, Colab CLI, and auth
-  auth        Run Google's official ADC flow through the selected provider transport
+  auth        Run the official Colab OAuth2 copy-paste login through the selected transport
   colab       Transparent passthrough to the official Colab CLI (native or WSL)
   wsl-path    Ask WSL/wslpath to translate an absolute Windows path; no drive letters are hardcoded
   uninstall   Remove only unmodified skill directories owned by remote-compute
@@ -298,7 +298,7 @@ async function doctor(args) {
     record('OK', 'Provider transport', runtime.transport.label);
     record('OK', 'Colab CLI', runtime.executable);
     const access = checkColabAccess({ env: providerEnv });
-    if (access.ok) record('OK', 'Colab authentication/access', 'read-only sessions query succeeded');
+    if (access.ok) record('OK', 'Colab authentication/access', 'OAuth2 read-only sessions query succeeded');
     else record('FAIL', 'Colab authentication/access', access.detail || 'run `remote-compute auth`');
   }
 
@@ -306,10 +306,10 @@ async function doctor(args) {
     || (process.platform === 'win32' ? createWslTransport({ env: providerEnv }).transport : null);
   if (providerTransport) {
     const gcloud = providerTransport.resolve('gcloud');
-    if (gcloud) record('INFO', 'gcloud', `${providerTransport.label}: ${gcloud}`);
-    else record('INFO', 'gcloud', `not installed in ${providerTransport.label}; needed for the recommended auth flow`);
+    if (gcloud) record('INFO', 'gcloud', `${providerTransport.label}: ${gcloud} (optional ADC mode)`);
+    else record('INFO', 'gcloud', `not installed in ${providerTransport.label}; optional unless explicit --auth=adc is used`);
   } else {
-    record('INFO', 'gcloud', 'provider transport unavailable');
+    record('INFO', 'gcloud', 'provider transport unavailable; optional for the managed OAuth2 flow');
   }
 
   record('OK', 'Platform', process.platform === 'win32' ? 'win32 (WSL bridge supported)' : process.platform);
@@ -345,14 +345,8 @@ async function auth(args) {
       console.error('Run `remote-compute setup --install-wsl --install-colab`.');
       process.exitCode = 2;
       break;
-    case 'missing_gcloud':
-      console.error('`gcloud` is required in the same environment as the Colab CLI for the recommended ADC flow.');
-      console.error('Install Google Cloud CLI there, then rerun `remote-compute auth`.');
-      console.error('remote-compute never stores Google credentials itself.');
-      process.exitCode = 2;
-      break;
-    case 'gcloud_auth_failed':
-      console.error(`Google authentication did not complete successfully${result.detail ? `: ${result.detail}` : '.'}`);
+    case 'oauth2_auth_failed':
+      console.error(`Colab OAuth2 authentication did not complete successfully${result.detail ? `: ${result.detail}` : '.'}`);
       process.exitCode = 1;
       break;
     case 'verification_failed':
