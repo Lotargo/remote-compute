@@ -1,0 +1,40 @@
+{
+  "name": "@lotargo/remote-compute",
+  "version": "0.1.0",
+  "description": "Bootstrap remote compute skills for Codex, AGY, Claude Code, and OpenCode without replacing their harnesses.",
+  "type": "module",
+  "bin": {
+    "remote-compute": "bin/remote-compute.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "node --check bin/remote-compute.mjs && node --check src/cli.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "agents",
+    "codex",
+    "claude-code",
+    "opencode",
+    "antigravity",
+    "colab",
+    "remote-compute",
+    "agent-skills"
+  ],
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lotargo/remote-compute.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Lotargo/remote-compute/issues"
+  },
+  "homepage": "https://github.com/Lotargo/remote-compute#readme"
+}
