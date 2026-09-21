@@ -1,7 +1,7 @@
 ---
 name: remote-compute
 description: Use remote compute when local CPU, RAM, GPU, VRAM, platform support, or isolation is insufficient. Prefer local execution when it is adequate; use the installed provider CLI for disposable remote workers, persistent external state, large assets, and artifact recovery.
-compatibility: Current provider requires the official Google Colab CLI (`colab`).
+compatibility: Current provider requires the official Google Colab CLI (`colab`); remote-compute transparently bridges it through WSL on Windows when needed.
 metadata:
   managed-by: remote-compute
   provider: colab
@@ -11,7 +11,7 @@ metadata:
 
 Use the host agent's existing planning, tool loop, permissions, and verification. This skill does not create a second harness.
 
-The current remote provider is Google Colab through Google's official `colab` CLI. Treat provider commands as an external capability, not as a new orchestration layer.
+The current remote provider is Google Colab through Google's official `colab` CLI. `remote-compute colab ...` is a transparent compatibility gateway: it invokes native `colab` where supported and automatically routes through WSL on Windows. Provider semantics still belong to the official Colab CLI.
 
 ## First principles
 
@@ -21,15 +21,16 @@ The current remote provider is Google Colab through Google's official `colab` CL
 4. Keep important state outside the worker.
 5. Do not duplicate provider behavior in ad-hoc scripts when the provider CLI already exposes it.
 6. Do not store or proxy provider credentials yourself.
+7. Do not make the user manually move their development workflow into WSL just to reach Colab.
 
 ## Discover provider behavior from the provider
 
-Before guessing Colab flags or workflows, inspect the installed CLI:
+Before guessing Colab flags or workflows, inspect the installed CLI through the compatibility gateway:
 
 ```bash
-colab skill
-colab help
-colab help <command>
+remote-compute colab skill
+remote-compute colab help
+remote-compute colab help <command>
 ```
 
 Use the provider's current self-documentation as the source of truth. The Colab CLI changes faster than this skill should.
@@ -37,11 +38,25 @@ Use the provider's current self-documentation as the source of truth. The Colab 
 For read-only environment checks, prefer commands such as:
 
 ```bash
-colab sessions
-colab status
+remote-compute colab sessions
+remote-compute colab status
 ```
 
 If authentication fails, ask the user to run `remote-compute auth` or complete Google's official authentication flow. Never request raw OAuth tokens, cookies, or credential files in chat.
+
+Do not reason about `wsl.exe`, drive-letter mount points, or Linux distribution internals unless diagnosing the compatibility layer itself. `remote-compute` owns that deterministic platform decision.
+
+## Windows path behavior
+
+On Windows, keep the user's repository in its normal Windows location. The provider bridge starts WSL in the current Windows working directory, so prefer relative local paths when sending files to the provider.
+
+Do not assume a drive such as `C:`, `F:`, or `Z:` maps to a hardcoded `/mnt/<letter>` path. If an absolute Windows path must be translated for a Linux-side command, use:
+
+```powershell
+remote-compute wsl-path "C:\path\to\file"
+```
+
+The bridge asks WSL's own `wslpath` implementation and therefore respects the user's WSL mount configuration. A path on a mapped/network drive may legitimately be unavailable to WSL; report that condition instead of inventing a mount path.
 
 ## Decide how to move source code
 
@@ -103,8 +118,9 @@ Use the simplest provider operation that fits the workload.
 - Use a named persistent session when multiple remote steps must share state.
 - For arbitrary Linux workloads, use the provider's supported shell/console/SSH facilities rather than forcing everything through Python.
 - Avoid interactive commands from a non-interactive agent unless the provider explicitly supports piped/headless usage.
+- Invoke Colab through `remote-compute colab ...` so the same agent workflow works on Windows, Linux, and macOS.
 
-For Colab-specific command details, read `colab skill` immediately before complex operations.
+For Colab-specific command details, read `remote-compute colab skill` immediately before complex operations.
 
 ## Verification
 
@@ -138,6 +154,7 @@ Do not:
 - store user credentials inside this skill or repository;
 - automatically commit/push user changes without permission;
 - assume a particular GPU is available until allocation succeeds;
+- hardcode Windows drive letters or `/mnt/<letter>` translations;
 - make workload-specific assumptions such as "this is always ML training" or "this is always ComfyUI".
 
 The capability is simply remote compute. The workload can be training, inference, compilation, CUDA tests, data processing, rendering, benchmarks, or something else entirely.
