@@ -231,6 +231,44 @@ remote-compute colab --auth=adc sessions
 
 `gcloud` is therefore optional and only relevant when the user explicitly chooses an ADC-based workflow.
 
+## Persistent data and Google Drive
+
+`remote-compute` does not implement a separate Google Drive API client. Colab's official CLI already exposes Drive mounting, so the same provider gateway is enough:
+
+```bash
+remote-compute colab drivemount -s <session>
+```
+
+The provider mounts Drive at `/content/drive` by default. Because `drivemount` is interactive, it may ask the user to grant browser consent and confirm in the terminal. Agents should not leave this waiting unattended; when consent is required, they should ask the user to complete the provider's interactive step and then continue.
+
+For small one-off file transfers, mounting Drive is unnecessary. Use the provider's upload/download commands instead:
+
+```bash
+remote-compute colab upload -s <session> <local> <remote>
+remote-compute colab download -s <session> <remote> <local>
+```
+
+For current provider flags, inspect:
+
+```bash
+remote-compute colab help drivemount
+remote-compute colab help upload
+remote-compute colab help download
+```
+
+A useful storage model is:
+
+```text
+Git / exact revision       = reproducible source code
+upload / download          = small disposable transfers
+Google Drive               = persistent large assets, checkpoints, shared outputs
+remote VM local disk       = hot working set for active computation
+```
+
+For heavy workloads, copy the hot subset from Drive to the Colab VM's local disk before repeated compute-heavy access. Keep durable checkpoints and important artifacts on persistent storage, but do not treat a mounted Drive directory as the performance-critical working set.
+
+This keeps the architecture simple: `remote-compute` owns setup and transport; the official Colab CLI owns Drive integration.
+
 ## Commands
 
 ### `remote-compute setup`
@@ -351,8 +389,9 @@ Its main rules are:
 - query `colab skill` / `colab help` through the gateway instead of guessing provider flags;
 - use exact Git revisions for reproducible jobs;
 - never silently commit or push user changes;
-- use disposable file transfer for small uncommitted experiments;
+- use upload/download for small disposable transfers and provider-native Drive mounting for persistent large assets;
 - keep large model weights, datasets, checkpoints, and generated assets out of Git;
+- copy hot data from persistent storage to remote local disk before repeated heavy access;
 - treat remote workers as disposable;
 - persist important state externally;
 - collect artifacts before teardown;
@@ -367,6 +406,7 @@ The agent should not reason about `wsl.exe`, `/mnt/f`, or distro internals durin
 
 - a second agent harness;
 - a custom Colab API client;
+- a custom Google Drive API/storage layer;
 - credential storage;
 - a Docker requirement;
 - workload-specific runtime logic;
