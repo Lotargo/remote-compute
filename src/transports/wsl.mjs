@@ -165,7 +165,7 @@ export function resolveWslCommand(command, {
 
   const result = runWslCommand('/bin/sh', [
     '-lc',
-    'command -v "$1"',
+    'candidate="$(command -v "$1" 2>/dev/null || true)"; if [ -n "$candidate" ]; then printf "%s\\n" "$candidate"; elif [ -x "$HOME/.local/bin/$1" ]; then printf "%s\\n" "$HOME/.local/bin/$1"; else exit 127; fi',
     'remote-compute',
     command,
   ], {
