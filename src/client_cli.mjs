@@ -61,15 +61,17 @@ export function runClientCli(name, args, {
     ? ['/d', '/s', '/c', executable, ...args]
     : args;
 
-  const result = spawnSync(command, commandArgs, {
+  const spawnOptions = {
     cwd,
     env,
     encoding: inherit ? undefined : 'utf8',
     stdio: inherit ? 'inherit' : 'pipe',
-    timeout,
     windowsHide: true,
     shell: false,
-  });
+  };
+  if (Number.isFinite(timeout) && timeout > 0) spawnOptions.timeout = timeout;
+
+  const result = spawnSync(command, commandArgs, spawnOptions);
 
   return {
     available: true,
