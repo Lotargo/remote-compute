@@ -85,20 +85,41 @@ Use this for small probes, temporary scripts, or uncommitted experiments where c
 
 Transfer only the required files using the provider CLI's supported upload/exec mechanisms. Avoid copying an entire large workspace when a small script or subset is sufficient.
 
-## Large assets
+For small one-off inputs and outputs, prefer the provider's direct file transfer commands instead of mounting persistent storage:
+
+```bash
+remote-compute colab upload -s <session> <local> <remote>
+remote-compute colab download -s <session> <remote> <local>
+```
+
+Check `remote-compute colab help upload` / `download` before relying on exact provider flags.
+
+## Persistent data and Google Drive
 
 Do not put large model weights, datasets, checkpoints, generated media, or similar binary assets into Git just to reach a remote worker.
 
-Use persistent external storage such as Google Drive when the user has provisioned it. Keep a clear separation:
+For Google Colab, prefer the provider's own Drive integration instead of building a separate Google Drive API client or storage wrapper. The official CLI exposes Drive mounting through the same gateway:
 
-```text
-persistent storage = source of truth for large assets and checkpoints
-remote local disk   = hot working set for active computation
+```bash
+remote-compute colab drivemount -s <session>
 ```
 
-For compute-heavy workloads, copy required hot assets to the worker's local disk before repeated use rather than repeatedly reading them through a mounted remote filesystem.
+By default the provider mounts Drive at `/content/drive`; inspect `remote-compute colab help drivemount` before depending on current flags or alternate paths.
 
-Do not assume Drive is mounted. Provider-side Drive mounting may require a human/interactive step. If it does, ask the user to complete that step instead of hanging an agent on an interactive prompt.
+Drive mounting is interactive and may require browser consent plus a terminal confirmation. Do not leave a non-interactive agent waiting on that prompt. Ask the user to complete the provider's consent step, then continue once the mount succeeds.
+
+Choose storage by lifecycle:
+
+```text
+Git / exact revision       = reproducible source code
+upload / download          = small disposable file transfer
+Google Drive               = persistent large assets, checkpoints, shared outputs
+remote VM local disk       = hot working set for active computation
+```
+
+For compute-heavy workloads, copy the hot subset from Drive to the remote VM's local disk before repeated reads/writes. Use Drive as durable storage, not as the performance-critical working directory. Periodically persist recoverable checkpoints and important artifacts back to Drive when losing the remote VM would otherwise lose work.
+
+Do not assume Drive is mounted merely because the Colab session exists. Verify the mount and required files before starting an expensive job.
 
 ## Long-running jobs and state
 
@@ -159,6 +180,7 @@ Do not:
 - automatically commit/push user changes without permission;
 - assume a particular GPU is available until allocation succeeds;
 - hardcode Windows drive letters or `/mnt/<letter>` translations;
+- build a parallel Google Drive API/storage layer when the provider CLI already exposes Drive mounting;
 - make workload-specific assumptions such as "this is always ML training" or "this is always ComfyUI".
 
 The capability is simply remote compute. The workload can be training, inference, compilation, CUDA tests, data processing, rendering, benchmarks, or something else entirely.
