@@ -3,6 +3,7 @@ import { runColabTransportTests } from './colab_transport.test.mjs';
 import { runContractTests } from './contracts.test.mjs';
 import { runHostTests } from './hosts.test.mjs';
 import { runPlatformTests } from './platform.test.mjs';
+import { runProviderGatewayTests } from './provider_gateway.test.mjs';
 import { runSkillTests } from './skills.test.mjs';
 import { runSetupTests } from './setup.test.mjs';
 import { runWslTransportTests } from './wsl_transport.test.mjs';
@@ -13,6 +14,7 @@ const suites = [
   ['contracts', runContractTests],
   ['hosts', runHostTests],
   ['platform contracts', runPlatformTests],
+  ['provider gateway', runProviderGatewayTests],
   ['skills', runSkillTests],
   ['setup lifecycle', runSetupTests],
   ['WSL transport', runWslTransportTests],
