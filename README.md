@@ -1,8 +1,10 @@
 # remote-compute
 
-`remote-compute` is a compact setup and compatibility layer that lets existing coding-agent harnesses use remote compute without replacing their planner, tool loop, permissions model, or provider CLI.
+Use **Google Colab as remote compute from Codex, AGY / Antigravity, OpenCode, and Claude Code** without replacing the agent's planner, tool loop, permissions model, or provider CLI.
 
-Current provider: **Google Colab through the official `colab` CLI**.
+`remote-compute` is a compact **Colab-first setup and compatibility layer** around Google's official `colab` CLI. It installs a managed agent skill, prepares provider tooling, bridges Windows to WSL when needed, handles the official Colab OAuth2 flow, and then gets out of the way.
+
+Current scope: **Google Colab through the official `google-colab-cli` / `colab` CLI**.
 
 Supported agent hosts:
 
@@ -11,15 +13,15 @@ Supported agent hosts:
 - OpenCode
 - Claude Code
 
-The project is intentionally small. It installs a managed agent skill, prepares provider tooling, bridges Windows to WSL when needed, handles the official Colab OAuth2 flow, and then gets out of the way.
-
 ## Why
 
-Coding agents are already capable of planning, delegating, retrying, inspecting files, running tests, and verifying results. Remote compute should be another capability available to that existing harness, not a second orchestration system.
+Coding agents already know how to plan, delegate, retry, inspect files, run tests, call APIs, use SSH, and verify results. Most ordinary remote servers therefore do not need another orchestration layer.
 
-`remote-compute` therefore follows a simple rule:
+Google Colab is a different kind of target: sessions are disposable, compute allocation is provider-specific, authentication is interactive, persistent data often lives outside the VM, and Windows users need a compatibility path because the official CLI is not a normal native Windows workflow.
 
-> keep planning in the host agent; keep provisioning and execution semantics in the official provider tooling.
+`remote-compute` exists to remove that provider-specific friction while preserving a simple rule:
+
+> keep planning in the host agent; keep provisioning and execution semantics in the official Colab tooling.
 
 Typical workloads include:
 
@@ -89,10 +91,10 @@ Codex / AGY / Claude Code / OpenCode
                    official colab
         └────────┬────────┘
                  ▼
-          remote compute
+          Google Colab
 ```
 
-The host agent remains responsible for planning, permissions, retries, delegation, tool use, and verification. The official provider CLI remains responsible for provider behavior. `remote-compute` only owns setup, policy, compatibility routing, and safe host integration.
+The host agent remains responsible for planning, permissions, retries, delegation, tool use, and verification. The official Colab CLI remains responsible for provider behavior. `remote-compute` only owns setup, policy, compatibility routing, and safe host integration.
 
 There is no custom Colab API client and no second agent runtime.
 
@@ -384,7 +386,7 @@ The bundled skill teaches policy rather than duplicating provider documentation.
 Its main rules are:
 
 - prefer local execution when local resources are sufficient;
-- use remote compute only when it materially helps;
+- use Colab remote compute only when it materially helps;
 - use `remote-compute colab ...` as the platform-neutral provider gateway;
 - query `colab skill` / `colab help` through the gateway instead of guessing provider flags;
 - use exact Git revisions for reproducible jobs;
@@ -407,6 +409,8 @@ The agent should not reason about `wsl.exe`, `/mnt/f`, or distro internals durin
 - a second agent harness;
 - a custom Colab API client;
 - a custom Google Drive API/storage layer;
+- a generic SSH abstraction;
+- a generic cloud-orchestration framework;
 - credential storage;
 - a Docker requirement;
 - workload-specific runtime logic;
@@ -416,6 +420,8 @@ The agent should not reason about `wsl.exe`, `/mnt/f`, or distro internals durin
 - account rotation or quota circumvention.
 
 It also does not automatically provision paid compute without an explicit user/provider action.
+
+Ordinary remote machines that are already reachable through SSH, HTTP, Triton, vLLM, TGI, or another standard interface should normally be used through those existing tools rather than wrapped by `remote-compute`.
 
 ## Local development and verification
 
@@ -520,12 +526,23 @@ See [CHANGELOG.md](./CHANGELOG.md).
 
 ## Roadmap
 
-The agent-facing policy is intentionally provider-neutral even though Google Colab is the first provider.
+The near-term roadmap is deliberately **Colab-first**:
 
-Possible future adapters may include SSH workers, RunPod, Vast.ai, or GCP without changing the agent-facing mental model.
+- harden real-world Colab session lifecycle and recovery;
+- collect edge cases from Windows, Linux, and macOS hosts;
+- improve agent guidance only where real usage shows repeated failure;
+- consider the official Colab MCP later as an optional integration for interactive browser-notebook workflows, while keeping the Colab CLI as the default headless compute path.
+
+`remote-compute` is not trying to become a generic SSH/cloud abstraction. Additional providers should only be considered when they introduce provider-specific friction that standard agent tools cannot already handle cleanly.
 
 The design rule remains simple: only add deterministic helpers when real usage proves that the official provider tooling plus the skill is not reliable enough.
 
+## Discoverability
+
+The project is intentionally branded around the problem it solves today: **Google Colab remote compute for coding agents**.
+
+Useful npm/GitHub discovery terms include `google-colab`, `colab`, `colab-cli`, `remote-compute`, `cloud-computing`, `gpu`, `coding-agents`, `ai-agents`, `agent-skills`, `codex`, `claude-code`, `opencode`, `antigravity`, `wsl`, and `windows`.
+
 ## Status
 
-**v0.1.0 release candidate.** The Windows + WSL + Colab path is working end-to-end, the local verification gate is green, and the next phase is real-world usage and edge-case collection rather than additional architecture for its own sake.
+**v0.1.0 release candidate.** The Windows + WSL + Colab path is working end-to-end, the local verification gate is green, and the next phase is real-world Colab usage and edge-case collection rather than broader cloud abstraction for its own sake.
