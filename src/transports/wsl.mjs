@@ -261,7 +261,8 @@ export function createWslTransport({
       return resolved.ok ? resolved.path : null;
     },
     run(command, args = [], options = {}) {
-      return runWslCommand(command, args, {
+      const executable = command.includes('/') ? command : (transport.resolve(command) || command);
+      return runWslCommand(executable, args, {
         env,
         platform,
         cwd: options.cwd ?? cwd,
