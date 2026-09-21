@@ -45,6 +45,7 @@ export async function runContractTests() {
     'test:contracts',
     'test:platform',
     'test:colab',
+    'test:gateway',
     'test:wsl',
     'package:check',
     'verify',
