@@ -10,6 +10,7 @@ import { HOST_DEFINITIONS } from '../src/hosts.mjs';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PACKAGE_PATH = join(ROOT, 'package.json');
 const SKILL_PATH = join(ROOT, 'skills', 'remote-compute', 'SKILL.md');
+const WSL_TRANSPORT_PATH = join(ROOT, 'src', 'transports', 'wsl.mjs');
 
 function normalizeNewlines(value) {
   return String(value).replace(/\r\n?/g, '\n');
@@ -28,6 +29,13 @@ export async function runContractTests() {
     assert.ok(pkg.files?.includes(path), `package files must include ${path}`);
   }
 
+  for (const path of [
+    'src/transports/native.mjs',
+    'src/transports/wsl.mjs',
+  ]) {
+    assert.equal(existsSync(join(ROOT, path)), true, `transport module must exist: ${path}`);
+  }
+
   assert.ok(!pkg.dependencies || Object.keys(pkg.dependencies).length === 0, 'runtime dependency contract is zero dependencies');
 
   const requiredScripts = [
@@ -36,6 +44,8 @@ export async function runContractTests() {
     'test',
     'test:contracts',
     'test:platform',
+    'test:colab',
+    'test:wsl',
     'package:check',
     'verify',
   ];
@@ -61,6 +71,16 @@ export async function runContractTests() {
   assert.match(skill, /managed-by:\s*remote-compute/);
   assert.match(skill, /provider:\s*colab/);
   assert.match(skill, /official `colab` CLI/i);
+  assert.match(skill, /remote-compute colab skill/);
+  assert.match(skill, /remote-compute wsl-path/);
+
+  const wslSource = normalizeNewlines(await readFile(WSL_TRANSPORT_PATH, 'utf8'));
+  assert.match(wslSource, /wslpath/);
+  assert.doesNotMatch(
+    wslSource,
+    /\/mnt\/[a-z](?:\/|['"`])/i,
+    'WSL path translation must not hardcode /mnt/<drive-letter>',
+  );
 
   const help = spawnSync(process.execPath, [join(ROOT, 'bin', 'remote-compute.mjs'), 'help'], {
     cwd: ROOT,
@@ -68,10 +88,10 @@ export async function runContractTests() {
     timeout: 10_000,
   });
   assert.equal(help.status, 0, help.stderr || help.stdout);
-  for (const command of ['setup', 'doctor', 'auth', 'uninstall']) {
+  for (const command of ['setup', 'doctor', 'auth', 'colab', 'wsl-path', 'uninstall']) {
     assert.match(help.stdout, new RegExp(`\\b${command}\\b`));
   }
-  for (const flag of flags) {
+  for (const flag of [...flags, '--install-wsl', '--wsl-distro']) {
     assert.ok(help.stdout.includes(flag), `help must document ${flag}`);
   }
 }
