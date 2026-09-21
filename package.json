@@ -13,11 +13,17 @@
     "README.md"
   ],
   "scripts": {
-    "check": "node --check bin/remote-compute.mjs && node --check src/cli.mjs && node --check src/client_cli.mjs && node --check src/client_paths.mjs && node --check src/hosts.mjs && node --check src/skills.mjs && node --check src/colab.mjs",
-    "test": "node tests/run_all.mjs"
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "check": "node --check bin/remote-compute.mjs && node --check src/cli.mjs && node --check src/client_cli.mjs && node --check src/client_paths.mjs && node --check src/hosts.mjs && node --check src/skills.mjs && node --check src/colab.mjs && node --check tests/run_all.mjs && node --check tests/client_cli.test.mjs && node --check tests/contracts.test.mjs && node --check tests/hosts.test.mjs && node --check tests/platform.test.mjs && node --check tests/skills.test.mjs && node --check tests/setup.test.mjs && node --check eslint.config.mjs",
+    "test": "node tests/run_all.mjs",
+    "test:contracts": "node tests/contracts.test.mjs",
+    "test:platform": "node tests/platform.test.mjs",
+    "package:check": "npm pack --dry-run --ignore-scripts",
+    "verify": "npm run lint && npm run check && npm test && npm run package:check"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18.18.0"
   },
   "keywords": [
     "agents",
@@ -37,5 +43,8 @@
   "bugs": {
     "url": "https://github.com/Lotargo/remote-compute/issues"
   },
-  "homepage": "https://github.com/Lotargo/remote-compute#readme"
+  "homepage": "https://github.com/Lotargo/remote-compute#readme",
+  "devDependencies": {
+    "eslint": "^9.0.0"
+  }
 }
