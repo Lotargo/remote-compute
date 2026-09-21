@@ -55,7 +55,9 @@ export async function runColabTransportTests() {
       PATH: wslBin,
       PATHEXT: '.EXE;.CMD;.BAT;.COM',
     };
+    let uvInstalled = false;
     let colabInstalled = false;
+    let uvBootstrapCalls = 0;
 
     const runner = (_name, args) => {
       if (args[0] === '--list') return result({ stdout: 'Ubuntu\r\n' });
@@ -63,12 +65,26 @@ export async function runColabTransportTests() {
       const command = execIndex >= 0 ? args[execIndex + 1] : null;
 
       if (command === '/bin/sh') {
-        const requested = args.at(-1);
-        if (requested === 'uv') return result({ stdout: '/home/test/.local/bin/uv\n' });
-        if (requested === 'colab' && colabInstalled) {
-          return result({ stdout: '/home/test/.local/bin/colab\n' });
+        const isResolver = args.includes('remote-compute');
+        if (isResolver) {
+          const requested = args.at(-1);
+          if (requested === 'curl') return result({ stdout: '/usr/bin/curl\n' });
+          if (requested === 'uv' && uvInstalled) {
+            return result({ stdout: '/home/test/.local/bin/uv\n' });
+          }
+          if (requested === 'colab' && colabInstalled) {
+            return result({ stdout: '/home/test/.local/bin/colab\n' });
+          }
+          return result({ ok: false, stderr: 'missing\n' });
         }
-        return result({ ok: false, stderr: 'missing\n' });
+
+        if (args.join(' ').includes('astral.sh/uv/install.sh')) {
+          uvBootstrapCalls += 1;
+          uvInstalled = true;
+          return result();
+        }
+
+        return result();
       }
 
       if (command?.endsWith('/uv') || command === 'uv') {
@@ -100,6 +116,8 @@ export async function runColabTransportTests() {
     });
     assert.equal(installed.ok, true);
     assert.equal(installed.transport.id, 'wsl');
+    assert.equal(installed.installer, 'uv');
+    assert.equal(uvBootstrapCalls, 1, 'missing uv should be bootstrapped exactly once through the official installer');
 
     const afterInstall = resolveColabRuntime({
       env: wslEnv,
