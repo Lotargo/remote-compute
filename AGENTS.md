@@ -2,7 +2,9 @@
 
 ## Purpose
 
-`remote-compute` is a compact setup and compatibility utility for existing coding-agent harnesses. It connects those harnesses to official remote-compute provider tooling without becoming another planner, executor framework, provider API client, or credential store.
+`remote-compute` is a compact **Colab-first** setup and compatibility utility for existing coding-agent harnesses. Its current product goal is to make Google Colab usable as remote compute from Codex, AGY / Antigravity, OpenCode, and Claude Code without becoming another planner, executor framework, provider API client, or credential store.
+
+The project name describes the capability exposed to the agent. It does **not** imply that the repository should become a universal abstraction over every kind of remote machine or cloud provider.
 
 The core boundary is simple:
 
@@ -14,7 +16,7 @@ The core boundary is simple:
 
 - Keep the host agent in charge of planning and execution strategy.
 - Prefer official provider CLIs or MCP servers over reimplementing provider APIs.
-- Keep the agent-facing skill provider-neutral where practical.
+- Keep the agent-facing skill provider-neutral where practical, but do not dilute the actual Colab-first product scope merely to look provider-agnostic.
 - Discover provider-specific behavior from the provider's current self-documentation instead of maintaining a large copied command reference.
 - Do not add workload-specific runtime logic for ComfyUI, training, inference, rendering, compilation, or any other single workload.
 - Treat remote workers as ephemeral and important state as external/persistent.
@@ -112,9 +114,13 @@ The current provider is Google Colab through the official `google-colab-cli` / `
 
 ## Scope discipline
 
-Before adding a wrapper command, ask whether the official provider CLI already solves the problem. If it does, teach the skill to use that provider capability instead of duplicating it.
+Before adding a wrapper command, ask whether the official Colab CLI already solves the problem. If it does, teach the skill to use that provider capability instead of duplicating it.
 
 Only add deterministic helper code when it removes platform-specific friction or repeated real-world failures. Do not add speculative abstractions "for later".
+
+Do **not** treat the absence of generic SSH, RunPod, Vast.ai, GCP, Triton, vLLM, TGI, or arbitrary HTTP adapters as a product gap. Coding agents already have mature standard tools for SSH and HTTP-based services. Add another provider only when real use demonstrates provider-specific friction that cannot be handled cleanly with those standard tools.
+
+The official Colab MCP may be considered later as an optional integration for interactive browser-notebook workflows. It should not replace the official Colab CLI as the default headless remote-compute path unless real usage demonstrates a clear reason.
 
 The currently supported public CLI surface should stay small and inspectable:
 
@@ -163,6 +169,7 @@ Before publishing a release:
 - confirm `npm pack --dry-run --ignore-scripts` contains only intended runtime/public files;
 - keep `README.md`, `CHANGELOG.md`, CLI help, package version, and actual behavior consistent;
 - preserve zero runtime dependencies unless intentionally changed;
+- keep npm/GitHub discovery language centered on Google Colab until the actual product scope changes;
 - do not describe Linux/macOS or other environments as end-to-end validated unless they were actually exercised on those hosts;
 - distinguish contract/test coverage from real-host smoke validation.
 
