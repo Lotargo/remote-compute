@@ -3,7 +3,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { checkColabAccess, installColabCli, resolveColabRuntime } from '../src/colab.mjs';
+import {
+  checkColabAccess,
+  installColabCli,
+  resolveColabRuntime,
+  withDefaultColabAuth,
+} from '../src/colab.mjs';
 
 function result({ ok = true, stdout = '', stderr = '', status = ok ? 0 : 1 } = {}) {
   return {
@@ -25,6 +30,11 @@ const quietOutput = Object.freeze({
 
 export async function runColabTransportTests() {
   console.log('--- Colab transport ---');
+
+  assert.deepEqual(withDefaultColabAuth(['sessions']), ['--auth=oauth2', 'sessions']);
+  assert.deepEqual(withDefaultColabAuth(['--auth=adc', 'sessions']), ['--auth=adc', 'sessions']);
+  assert.deepEqual(withDefaultColabAuth(['--auth', 'adc', 'sessions']), ['--auth', 'adc', 'sessions']);
+
   const root = await mkdtemp(join(tmpdir(), 'remote-compute-colab-transport-'));
   const nativeBin = join(root, 'native-bin');
   const wslBin = join(root, 'wsl-bin');
@@ -58,6 +68,7 @@ export async function runColabTransportTests() {
     let uvInstalled = false;
     let colabInstalled = false;
     let uvBootstrapCalls = 0;
+    const colabCalls = [];
 
     const runner = (_name, args) => {
       if (args[0] === '--list') return result({ stdout: 'Ubuntu\r\n' });
@@ -92,8 +103,9 @@ export async function runColabTransportTests() {
         colabInstalled = true;
         return result();
       }
-      if ((command?.endsWith('/colab') || command === 'colab') && args.includes('sessions')) {
-        return result({ stdout: '[]\n' });
+      if (command?.endsWith('/colab') || command === 'colab') {
+        colabCalls.push(args.slice(execIndex + 2));
+        if (args.includes('sessions')) return result({ stdout: '[]\n' });
       }
       return result();
     };
@@ -138,6 +150,10 @@ export async function runColabTransportTests() {
     });
     assert.equal(access.ok, true);
     assert.equal(access.runtime.mode, 'wsl');
+    assert.ok(
+      colabCalls.some((args) => args[0] === '--auth=oauth2' && args[1] === 'sessions'),
+      'managed read-only access checks must use the explicit oauth2 provider',
+    );
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
