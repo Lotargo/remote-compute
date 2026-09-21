@@ -101,6 +101,7 @@ export function checkColabAccess({
   const result = runtime.transport.run('colab', ['sessions'], {
     cwd,
     timeout: 30_000,
+    bridgeCwd: false,
   });
 
   if (result.ok) {
@@ -130,6 +131,7 @@ function installIntoTransport(transport, {
     const result = transport.run(installer.command, installer.args, {
       timeout: 300_000,
       inherit: true,
+      bridgeCwd: false,
     });
 
     if (!result.ok) {
@@ -240,6 +242,7 @@ export function authenticateColab({
     cwd,
     timeout: 300_000,
     inherit: true,
+    bridgeCwd: false,
   });
 
   if (!login.ok) {
@@ -288,6 +291,7 @@ export function forwardColab(args = [], {
     cwd,
     timeout: null,
     inherit: true,
+    bridgeCwd: true,
   });
 
   return {
