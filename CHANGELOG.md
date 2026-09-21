@@ -14,12 +14,12 @@ Initial release of `remote-compute`.
 
 ### Highlights
 
-- Added a compact setup layer for existing coding-agent harnesses instead of introducing a second planner/runtime.
-- Added Google Colab as the first remote-compute provider through the official `google-colab-cli`.
+- Added a compact **Google Colab remote-compute integration layer for existing coding-agent harnesses** instead of introducing a second planner/runtime.
+- Added Google Colab through the official `google-colab-cli`, with package/discovery metadata centered on Colab rather than a generic cloud-orchestration promise.
 - Added a transparent Windows -> WSL compatibility bridge, allowing users to stay in PowerShell and keep their repositories and agent CLIs on Windows.
 - Added the official Colab OAuth2 copy-paste login flow, verified end-to-end from Windows through WSL to Google Colab.
 - Added agent guidance for provider-native Google Drive mounting and persistent large-asset/checkpoint workflows without introducing a separate Drive API client.
-- Kept runtime dependencies at zero and avoided Docker, a custom Colab API client, and credential storage.
+- Kept runtime dependencies at zero and avoided Docker, a custom Colab API client, credential storage, and a generic SSH/cloud abstraction.
 
 ### Added
 
@@ -93,7 +93,7 @@ Initial release of `remote-compute`.
 - Added a provider-facing skill that keeps planning inside the existing host harness.
 - The skill teaches agents to:
   - prefer local compute when sufficient;
-  - use remote compute only when useful;
+  - use Colab remote compute only when useful;
   - consult provider self-documentation through `remote-compute colab skill/help`;
   - use exact Git revisions for reproducible jobs;
   - avoid silently committing or pushing user work;
@@ -153,7 +153,10 @@ The validated environment reached `remote-compute doctor -> Status: READY`, and 
 
 ### Known scope for 0.1.0
 
-- Google Colab is the only provider adapter in this release.
+- Google Colab is the product focus and the only provider adapter in this release.
+- The project intentionally does not treat generic SSH/HTTP-accessible compute as a missing provider; existing agent tools should be used directly for ordinary remote servers and exposed inference APIs.
+- Additional provider adapters are not a roadmap requirement and should only be added when real provider-specific friction justifies them.
+- The official Colab MCP is a possible future optional integration for interactive browser-notebook workflows; the official Colab CLI remains the default headless compute path.
 - Windows uses WSL as the compatibility backend when native Colab is unavailable.
 - Google Drive access uses Colab CLI's interactive provider-native `drivemount` flow rather than a custom Drive integration; unattended agents may require user consent before continuing.
 - Fresh WSL installations may require a restart and one-time distro initialization before provider setup can finish.
